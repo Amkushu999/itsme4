@@ -81,6 +81,10 @@ object Camera1Hooks {
     // ── Install ───────────────────────────────────────────────────────────────
 
     fun hookAll(lpparam: XC_LoadPackage.LoadPackageParam) {
+        if (AppState.useNativeHook) {
+            Logger.i(Logger.HOOK, "$TAG native hook active — skipping Java Camera1 hooks for ${lpparam.packageName}")
+            return
+        }
         Logger.d(Logger.HOOK, "Camera1Hooks hookAll: pkg=${lpparam.packageName}")
         try {
             val camClass = XposedHelpers.findClass("android.hardware.Camera", lpparam.classLoader)

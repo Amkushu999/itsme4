@@ -93,3 +93,23 @@ target_link_libraries(libyuv_wrapper
 )
 
 target_compile_features(libyuv_wrapper PRIVATE cxx_std_14)
+
+# ── frame_producer.so — Ashmem ring buffer + UDS fd sender (NativeFrameProducer JNI) ──
+# Sends NV12 frames to the Zygisk hookProxy via shared memory.
+# Uses FFmpeg for video/RTSP/image decoding (already linked in ffmpeg_decoder).
+add_library(frame_producer SHARED frame_producer.cpp)
+
+target_include_directories(frame_producer PRIVATE
+    "${FFMPEG_ABI_DIR}/include"
+)
+
+target_compile_options(frame_producer PRIVATE
+    -O2 -fPIC -fno-sanitize=cfi -DNDEBUG
+)
+
+target_link_libraries(frame_producer
+    avformat avcodec avutil swresample swscale
+    ${log-lib} ${android-lib}
+)
+
+target_compile_features(frame_producer PRIVATE cxx_std_17)

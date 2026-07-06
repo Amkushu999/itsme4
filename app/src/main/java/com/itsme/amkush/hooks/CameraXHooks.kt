@@ -28,6 +28,10 @@ object CameraXHooks {
     private const val TAG = "CameraXHooks"
 
     fun hookAll(lpparam: XC_LoadPackage.LoadPackageParam) {
+        if (AppState.useNativeHook) {
+            Logger.i(Logger.HOOK, "$TAG native hook active — skipping Java CameraX hooks for ${lpparam.packageName}")
+            return
+        }
         try {
             Logger.v(Logger.HOOK, "$TAG installing setAnalyzer hook")
             hookImageAnalysisSetAnalyzer(lpparam)

@@ -122,6 +122,11 @@ object Camera2Hooks {
     fun hookAll(lpparam: XC_LoadPackage.LoadPackageParam) {
         HookLogger.d(TAG, "hookAll: pkg=${lpparam.packageName}")
 
+        if (AppState.useNativeHook) {
+            HookLogger.i(TAG, "native hook active — skipping Java Camera2 hooks for ${lpparam.packageName}")
+            return
+        }
+
         if (!ensureActiveAndTarget(lpparam)) return
 
         withReentrancyGuard {

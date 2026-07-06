@@ -66,6 +66,16 @@ object AppState {
     // thread visibility in case the InjectionService thread also reads it.
     @Volatile var injectionSource: String? = null   // "stream" | "media" | null
 
+    // ── Native hook mode ──────────────────────────────────────────────────────
+    //
+    // When true, the Java-level Camera1/2/X Xposed hooks are bypassed entirely.
+    // Frame injection is handled by the Zygisk hookProxy module running inside
+    // cameraserver (Layer 4), fed via NativeFrameProducer over Ashmem + UDS.
+    //
+    // Set this to true in the app's settings / hook initialisation when the
+    // Zygisk module is detected as active.
+    @Volatile var useNativeHook: Boolean = false
+
     val isInjectionActive: Boolean get() = injectionSource != null
 
     /** Write a new frame atomically — single volatile reference swap. */
