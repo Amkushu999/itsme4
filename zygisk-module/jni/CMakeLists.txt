@@ -1,117 +1,85 @@
 cmake_minimum_required(VERSION 3.22.1)
-project("amkush_hook" CXX C)
+  project("amkush_hook" CXX C)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if(NOT ANDROID_ABI MATCHES "arm64-v8a|x86_64")
-    message(FATAL_ERROR "Only arm64-v8a and x86_64 are supported. Got: ${ANDROID_ABI}")
-endif()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-sanitize=cfi -fvisibility=hidden -fno-exceptions -fno-rtti -Wall -Wno-unused-parameter")
+  set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -fno-sanitize=cfi -fvisibility=hidden -Wall")
 
-if(NOT DEFINED ANDROID_PLATFORM)
-    set(ANDROID_PLATFORM "android-28")
-endif()
+  set(HOOK_SOURCES
+      main.cpp hook_proxy.cpp symbol_resolver.cpp stream_map.cpp
+      frame_source.cpp frame_inject.cpp crash_guard.cpp ipc_socket.cpp
+  )
 
-# ── Compiler flags ────────────────────────────────────────────────────────────
-# -fno-sanitize=cfi          : prevent CFI from aborting inline hooks
-# -fvisibility=hidden        : only __attribute__((visibility("default"))) exported
-# -fno-exceptions            : camera hooks cannot use C++ exceptions safely
-# -fno-rtti                  : reduces binary size; we use explicit casts
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
-    -fno-sanitize=cfi \
-    -fvisibility=hidden \
-    -fno-exceptions \
-    -fno-rtti \
-    -Wno-unused-parameter \
-    -Wall")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} \
-    -fno-sanitize=cfi \
-    -fvisibility=hidden \
-    -Wall")
+  add_library(hookProxy SHARED ${HOOK_SOURCES})
 
-# ── Source files ───────────────────────────────────────────────────────────────
-set(HOOK_SOURCES
-    main.cpp
-    hook_proxy.cpp
-    symbol_resolver.cpp
-    stream_map.cpp
-    frame_source.cpp
-    frame_inject.cpp
-    crash_guard.cpp
-    ipc_socket.cpp
-)
+  target_include_directories(hookProxy PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${CMAKE_CURRENT_SOURCE_DIR}
+  )
 
-# ── Main hook library ──────────────────────────────────────────────────────────
-add_library(hookProxy SHARED ${HOOK_SOURCES})
+  find_library(LOG_LIB log)
+  find_library(ANDROID_LIB android)
+  find_library(SYNC_LIB sync)
+  target_link_libraries(hookProxy ${LOG_LIB} ${ANDROID_LIB} ${SYNC_LIB})
 
-# ── Include paths ──────────────────────────────────────────────────────────────
-target_include_directories(hookProxy PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include   # camera3_compat.h
-    ${CMAKE_CURRENT_SOURCE_DIR}           # zygisk.hpp, *.h
-)
+  # ── ShadowHook ─────────────────────────────────────────────────────────────────
+  # CI path: pass -DSHADOWHOOK_ROOT=<dir> containing include/ and <ABI>/lib*.
+  # Gradle path: find_package via prefab (automatic when building with AGP).
+  if(DEFINED SHADOWHOOK_ROOT)
+      message(STATUS "ShadowHook: prebuilt at ${SHADOWHOOK_ROOT}")
+      target_include_directories(hookProxy PRIVATE "${SHADOWHOOK_ROOT}/include")
+      if(EXISTS "${SHADOWHOOK_ROOT}/${ANDROID_ABI}/libshadowhook.a")
+          add_library(sh_lib STATIC IMPORTED)
+          set_target_properties(sh_lib PROPERTIES IMPORTED_LOCATION "${SHADOWHOOK_ROOT}/${ANDROID_ABI}/libshadowhook.a")
+      elseif(EXISTS "${SHADOWHOOK_ROOT}/${ANDROID_ABI}/libshadowhook.so")
+          add_library(sh_lib SHARED IMPORTED)
+          set_target_properties(sh_lib PROPERTIES IMPORTED_LOCATION "${SHADOWHOOK_ROOT}/${ANDROID_ABI}/libshadowhook.so")
+      else()
+          message(FATAL_ERROR "ShadowHook lib not found under ${SHADOWHOOK_ROOT}/${ANDROID_ABI}/")
+      endif()
+      target_link_libraries(hookProxy sh_lib)
+  else()
+      find_package(shadowhook REQUIRED CONFIG)
+      target_link_libraries(hookProxy shadowhook::shadowhook)
+  endif()
 
-# ── ShadowHook — ByteDance inline hook library ─────────────────────────────────
-# In build.gradle for the Zygisk module app:
-#   implementation 'com.bytedance.android:shadowhook:2.0.1'
-#   buildFeatures { prefab true }
-find_package(shadowhook REQUIRED CONFIG)
-target_link_libraries(hookProxy shadowhook::shadowhook)
+  # ── libyuv ────────────────────────────────────────────────────────────────────
+  if(DEFINED LIBYUV_ROOT)
+      message(STATUS "libyuv: prebuilt at ${LIBYUV_ROOT}")
+      target_include_directories(hookProxy PRIVATE "${LIBYUV_ROOT}/include")
+      add_library(yuv_lib STATIC IMPORTED)
+      set_target_properties(yuv_lib PROPERTIES IMPORTED_LOCATION "${LIBYUV_ROOT}/${ANDROID_ABI}/libyuv.a")
+      target_link_libraries(hookProxy yuv_lib)
+  else()
+      find_library(LIBYUV_LIB yuv PATHS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libyuv/libs/${ANDROID_ABI})
+      if(LIBYUV_LIB)
+          target_link_libraries(hookProxy ${LIBYUV_LIB})
+          target_include_directories(hookProxy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libyuv/include)
+      else()
+          message(WARNING "libyuv not found — YUV conversion disabled")
+          target_compile_definitions(hookProxy PRIVATE DISABLE_LIBYUV=1)
+      endif()
+  endif()
 
-# ── libyuv ────────────────────────────────────────────────────────────────────
-# Preferred: prefab from 'io.github.leleliu008:libyuv-android:0.0.2'
-# Fallback:  place libyuv.a + libyuv/ headers in third_party/libyuv/
-find_package(libyuv QUIET CONFIG)
-if(libyuv_FOUND)
-    target_link_libraries(hookProxy libyuv::yuv)
-else()
-    message(STATUS "libyuv prefab not found — using bundled static library")
-    add_library(yuv STATIC IMPORTED)
-    set_target_properties(yuv PROPERTIES
-        IMPORTED_LOCATION
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libyuv/libs/${ANDROID_ABI}/libyuv.a"
-    )
-    target_include_directories(hookProxy PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libyuv/include
-    )
-    target_link_libraries(hookProxy yuv)
-endif()
+  # ── libjpeg-turbo ─────────────────────────────────────────────────────────────
+  if(DEFINED TURBOJPEG_ROOT)
+      message(STATUS "turbojpeg: prebuilt at ${TURBOJPEG_ROOT}")
+      target_include_directories(hookProxy PRIVATE "${TURBOJPEG_ROOT}/include")
+      add_library(tj_lib STATIC IMPORTED)
+      set_target_properties(tj_lib PROPERTIES IMPORTED_LOCATION "${TURBOJPEG_ROOT}/${ANDROID_ABI}/libturbojpeg.a")
+      target_link_libraries(hookProxy tj_lib)
+  else()
+      find_library(TJ_LIB turbojpeg)
+      if(TJ_LIB)
+          target_link_libraries(hookProxy ${TJ_LIB})
+      else()
+          message(WARNING "turbojpeg not found — JPEG snapshot injection disabled")
+          target_compile_definitions(hookProxy PRIVATE DISABLE_JPEG_INJECTION=1)
+      endif()
+  endif()
 
-# ── libjpeg-turbo ─────────────────────────────────────────────────────────────
-find_library(TURBOJPEG_LIB turbojpeg)
-if(TURBOJPEG_LIB)
-    target_link_libraries(hookProxy ${TURBOJPEG_LIB})
-else()
-    message(STATUS "turbojpeg not in NDK sysroot — looking for bundled prebuilt")
-    add_library(turbojpeg STATIC IMPORTED)
-    set_target_properties(turbojpeg PROPERTIES
-        IMPORTED_LOCATION
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/turbojpeg/libs/${ANDROID_ABI}/libturbojpeg.a"
-    )
-    target_include_directories(hookProxy PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/turbojpeg/include
-    )
-    target_link_libraries(hookProxy turbojpeg)
-endif()
-
-# ── NDK / system libraries ────────────────────────────────────────────────────
-find_library(LOG_LIB     log)
-find_library(ANDROID_LIB android)
-find_library(SYNC_LIB    sync)
-
-target_link_libraries(hookProxy
-    ${LOG_LIB}
-    ${ANDROID_LIB}
-    ${SYNC_LIB}
-)
-
-# ── Strip debug symbols in release builds ─────────────────────────────────────
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_custom_command(TARGET hookProxy POST_BUILD
-        COMMAND ${CMAKE_STRIP} --strip-all $<TARGET_FILE:hookProxy>
-        COMMENT "Stripping hookProxy.so"
-    )
-endif()
-
-set_target_properties(hookProxy PROPERTIES OUTPUT_NAME "hookProxy")
-
-message(STATUS "amkush hookProxy configured for ${ANDROID_ABI} / ${ANDROID_PLATFORM}")
+  set_target_properties(hookProxy PROPERTIES OUTPUT_NAME "hookProxy")
+  message(STATUS "hookProxy configured — ABI=${ANDROID_ABI}")
+  
