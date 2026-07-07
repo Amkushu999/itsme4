@@ -18,7 +18,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <errno.h>
-#include <sync/sync.h>
+// sync_wait is a C function in libsync.so. <sync/sync.h> is not shipped in
+// NDK r25 public headers, so we declare it here at file scope with extern "C"
+// to prevent C++ name mangling. libsync is linked via CMakeLists find_library.
+extern "C" int sync_wait(int fd, int timeout_msec);
 #include <vector>
 
 #include <libyuv.h>
