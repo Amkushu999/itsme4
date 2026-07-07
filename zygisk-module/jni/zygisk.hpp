@@ -83,9 +83,12 @@ public:
     void *connectCompanion();
     void *getModuleData();
 
+    // Internal: called only from internal::entry_impl to initialise the
+    // impl pointer.  Not part of the public Zygisk API.
+    void _set_impl(internal::api_table *t) { impl = t; }
+
 private:
     internal::api_table *impl;
-    friend int (*)(const internal::api_table *, internal::module_abi *);
 };
 
 // ---------------------------------------------------------------------------
@@ -128,16 +131,6 @@ struct api_table {
     void *(*getModuleData)(api_table *);
 };
 
-inline void Api::setOption(Option opt) {
-    impl->setOption(impl, opt);
-}
-inline int Api::getModuleDir() {
-    return impl->getModuleDir(impl);
-}
-inline bool Api::exemptFd(int fd) {
-    return impl->exemptFd(impl, fd);
-}
-
 template <class T>
 void *entry_impl(internal::api_table *table, JNIEnv *env) {
     auto *mod = new T();
@@ -151,13 +144,28 @@ void *entry_impl(internal::api_table *table, JNIEnv *env) {
     table->registerModule(table, &abi);
 
     auto *api = new Api();
-    api->impl = table;
-    // JNI environment is available as the env arg passed to the entry point.
+    api->_set_impl(table);
     mod->onLoad(api, env);
     return nullptr;
 }
 
 } // namespace internal
+
+// ---------------------------------------------------------------------------
+// Api inline method definitions
+// Must live in namespace zygisk (where Api is declared), not in
+// namespace zygisk::internal — C++ forbids out-of-class definitions from a
+// child namespace that does not enclose the class.
+// ---------------------------------------------------------------------------
+inline void Api::setOption(Option opt) {
+    impl->setOption(impl, opt);
+}
+inline int Api::getModuleDir() {
+    return impl->getModuleDir(impl);
+}
+inline bool Api::exemptFd(int fd) {
+    return impl->exemptFd(impl, fd);
+}
 
 using EntryFn = void *(*)(internal::api_table *, JNIEnv *);
 using CompanionFn = void (*)(int);
