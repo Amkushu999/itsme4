@@ -1,80 +1,97 @@
 package com.itsme.amkush.ui
 
-import android.content.Context
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.itsme.amkush.model.AppInfo
-import com.itsme.amkush.network.ApiClient
-import com.itsme.amkush.network.Response
-import com.itsme.amkush.network.models.TokenRequest
-import com.itsme.amkush.utils.DeviceUtils
-import com.itsme.amkush.utils.Logger
-import com.itsme.amkush.utils.SharedPrefs
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+  import android.content.Context
+  import androidx.lifecycle.LiveData
+  import androidx.lifecycle.MutableLiveData
+  import androidx.lifecycle.ViewModel
+  import androidx.lifecycle.viewModelScope
+  import com.itsme.amkush.model.AppInfo
+  import com.itsme.amkush.network.Response
+  import com.itsme.amkush.security.LicenseGuard
+  import com.itsme.amkush.utils.DeviceUtils
+  import com.itsme.amkush.utils.Logger
+  import com.itsme.amkush.utils.SharedPrefs
+  import kotlinx.coroutines.Dispatchers
+  import kotlinx.coroutines.launch
+  import kotlinx.coroutines.withContext
 
-class HomeViewModel(private val context: Context) : ViewModel() {
+  class HomeViewModel(private val context: Context) : ViewModel() {
 
-    private val _tokenStatus = MutableLiveData<Response<Boolean>>(Response.Loading)
-    val tokenStatus: LiveData<Response<Boolean>> = _tokenStatus
+      private val _tokenStatus = MutableLiveData<Response<Boolean>>(Response.Loading)
+      val tokenStatus: LiveData<Response<Boolean>> = _tokenStatus
 
-    private val _targetApp = MutableLiveData<AppInfo?>()
-    val targetApp: LiveData<AppInfo?> = _targetApp
+      private val _targetApp = MutableLiveData<AppInfo?>()
+      val targetApp: LiveData<AppInfo?> = _targetApp
 
-    init {
-        loadSavedTarget()
-        checkTokenStatus()
-    }
+      init {
+          loadSavedTarget()
+          checkTokenStatus()
+      }
 
-    private fun loadSavedTarget() {
-        val packageName = SharedPrefs.getTargetPackage()
-        val appName = SharedPrefs.getTargetAppName()
-        if (!packageName.isNullOrEmpty() && !appName.isNullOrEmpty()) {
-            _targetApp.value = AppInfo(packageName, appName)
-        }
-    }
+      private fun loadSavedTarget() {
+          val packageName = SharedPrefs.getTargetPackage()
+          val appName = SharedPrefs.getTargetAppName()
+          if (!packageName.isNullOrEmpty() && !appName.isNullOrEmpty()) {
+              _targetApp.value = AppInfo(packageName, appName)
+          }
+      }
 
-    fun setTargetApp(app: AppInfo) {
-        _targetApp.value = app
-        SharedPrefs.setTargetPackage(app.packageName)
-        SharedPrefs.setTargetAppName(app.appName)
-    }
+      fun setTargetApp(app: AppInfo) {
+          _targetApp.value = app
+          SharedPrefs.setTargetPackage(app.packageName)
+          SharedPrefs.setTargetAppName(app.appName)
+      }
 
-    private fun checkTokenStatus() {
-        val token = SharedPrefs.getActivationToken()
-        if (token.isNullOrEmpty()) {
-            _tokenStatus.value = Response.Error("No token found")
-            return
-        }
+      private fun checkTokenStatus() {
+          viewModelScope.launch(Dispatchers.IO) {
+              try {
+                  // 1. Fast path: encrypted native license file (no network needed)
+                  if (LicenseGuard.nativeIsActivated(context)) {
+                      _tokenStatus.postValue(Response.Success(true))
+                      return@launch
+                  }
 
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val apiService = ApiClient.getApiService()
-                val deviceId = DeviceUtils.getDeviceId(context)
-                val request = TokenRequest(token, deviceId)
-                val response = apiService.verifyToken(request).execute()
+                  // 2. Slow path: server token re-verify (SharedPrefs token may still be valid)
+                  val token = SharedPrefs.getActivationToken()
+                  if (token.isNullOrEmpty()) {
+                      _tokenStatus.postValue(Response.Error("No activation found"))
+                      return@launch
+                  }
 
-                // Use postValue (thread-safe) instead of value= (main-thread only).
-                // The coroutine runs on Dispatchers.IO so .value= would throw
-                // IllegalStateException ("Cannot invoke setValue on a background thread").
-                if (response.isSuccessful && response.body()?.valid == true) {
-                    _tokenStatus.postValue(Response.Success(true))
-                } else {
-                    SharedPrefs.clearActivation()
-                    _tokenStatus.postValue(Response.Error("Invalid token"))
-                }
-            } catch (e: Exception) {
-                Logger.e("Error checking token", e)
-                _tokenStatus.postValue(Response.Error("Network error"))
-            }
-        }
-    }
+                  val deviceId = DeviceUtils.getDeviceId(context)
+                  val result = LicenseGuard.verifyToken(token, deviceId)
 
-    fun clearTarget() {
-        _targetApp.value = null
-        SharedPrefs.clearTarget()
-    }
-}
+                  if (result.valid) {
+                      // Re-save to native encrypted file so next launch is fast
+                      val expiryMs = parseExpiryMs(result.expiresAt)
+                      LicenseGuard.nativeSaveActivation(context, token, result.isTrial, expiryMs)
+                      _tokenStatus.postValue(Response.Success(true))
+                  } else {
+                      SharedPrefs.clearActivation()
+                      LicenseGuard.nativeClearActivation(context)
+                      _tokenStatus.postValue(Response.Error("Invalid or expired token"))
+                  }
+              } catch (e: Exception) {
+                  Logger.e("Error checking token", e)
+                  _tokenStatus.postValue(Response.Error("Network error"))
+              }
+          }
+      }
+
+      fun clearTarget() {
+          _targetApp.value = null
+          SharedPrefs.clearTarget()
+      }
+
+      companion object {
+          fun parseExpiryMs(expiresAt: String?): Long {
+              if (expiresAt.isNullOrEmpty()) return 0L
+              return try {
+                  val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+                  sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                  sdf.parse(expiresAt)?.time ?: 0L
+              } catch (_: Exception) { 0L }
+          }
+      }
+  }
+  
