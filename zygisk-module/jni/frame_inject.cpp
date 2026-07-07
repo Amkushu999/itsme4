@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <sync/sync.h>
 #include <vector>
 
 #include <libyuv.h>
@@ -297,7 +298,7 @@ bool frame_inject_one(const camera3_stream_buffer_t *buf,
 
     // Wait out the acquire fence (if any) — max 10 ms.
     if (buf->acquire_fence >= 0) {
-        extern "C" int sync_wait(int fd, int timeout);
+
         if (sync_wait(buf->acquire_fence, 10) != 0) {
             LOGW("acquire_fence %d timed out — skipping frame", buf->acquire_fence);
             return false;
