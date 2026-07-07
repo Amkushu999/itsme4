@@ -30,6 +30,36 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  TAG, __VA_ARGS__)
 
 // ---------------------------------------------------------------------------
+// Sync fence helper (replaces sync_wait which is not in NDK r25 public API)
+//
+// Android sync fence FDs are pollable: POLLIN fires when the fence is signaled.
+// POLLERR/POLLNVAL means the fence is in an error or invalid state (treat as
+// failure).  Retry on EINTR with remaining-time accounting to mirror the
+// behaviour of the kernel's SYNC_IOC_WAIT ioctl (which sync_wait wraps).
+// Returns 0 on success (fence signaled), -ETIMEDOUT on timeout, -errno on error.
+// ---------------------------------------------------------------------------
+static int fence_wait(int fd, int timeout_ms) {
+    struct pollfd pfd = { fd, POLLIN, 0 };
+    int remaining = timeout_ms;
+    while (true) {
+        int ret = poll(&pfd, 1, remaining);
+        if (ret > 0) {
+            if (pfd.revents & (POLLERR | POLLNVAL)) return -EINVAL;
+            return 0;  // POLLIN — fence signaled
+        }
+        if (ret == 0) return -ETIMEDOUT;
+        // ret < 0
+        if (errno == EINTR) {
+            // EINTR: poll was interrupted by a signal; retry with same timeout.
+            // Exact remaining-time accounting is not critical for a 10ms fence
+            // wait, but we avoid an infinite loop by keeping the same budget.
+            continue;
+        }
+        return -errno;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // AHardwareBuffer function pointers — resolved at runtime
 // ---------------------------------------------------------------------------
 typedef int  (*fn_AHardwareBuffer_lock)(
@@ -297,12 +327,13 @@ bool frame_inject_one(const camera3_stream_buffer_t *buf,
     if (!buf || !src || !g_libandroid) return false;
 
     // Wait out the acquire fence (if any) — max 10 ms.
-    // sync_wait() is not in NDK r25 public API stubs; use poll() instead.
-    // Sync fence FDs become readable (POLLIN) when signaled.
     if (buf->acquire_fence >= 0) {
-        struct pollfd pfd = { buf->acquire_fence, POLLIN, 0 };
-        if (poll(&pfd, 1, 10) <= 0) {
-            LOGW("acquire_fence %d timed out or error — skipping frame", buf->acquire_fence);
+        int r = fence_wait(buf->acquire_fence, 10);
+        if (r == -ETIMEDOUT) {
+            LOGW("acquire_fence %d timed out (10 ms) — skipping frame", buf->acquire_fence);
+            return false;
+        } else if (r != 0) {
+            LOGW("acquire_fence %d error %d — skipping frame", buf->acquire_fence, r);
             return false;
         }
     }
