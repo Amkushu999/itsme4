@@ -5,7 +5,7 @@
 // default disposition kills the cameraserver process, causing the phone
 // to restart the camera stack (audible click / black screen flash).
 //
-// We register a custom SA_SIGACTION handler. Inside the frame injection
+// We register a custom SA_SIGINFO handler. Inside the frame injection
 // callback we use sigsetjmp to save CPU state. If a fault fires, our
 // handler calls siglongjmp back to that checkpoint, the hook skips
 // synthetic injection for that frame, and calls the original function,
@@ -42,7 +42,7 @@ static void signal_handler(int sig, siginfo_t *info, void *ctx) {
     }
 
     struct sigaction *prev = (sig == SIGSEGV) ? &prev_sigsegv : &prev_sigbus;
-    if (prev->sa_flags & SA_SIGACTION) {
+    if (prev->sa_flags & SA_SIGINFO) {
         prev->sa_sigaction(sig, info, ctx);
     } else if (prev->sa_handler == SIG_DFL || prev->sa_handler == SIG_IGN) {
         struct sigaction dfl;
@@ -59,7 +59,7 @@ int crash_guard_init(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = signal_handler;
-    sa.sa_flags     = SA_SIGACTION | SA_RESTART | SA_ONSTACK;
+    sa.sa_flags     = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
     sigemptyset(&sa.sa_mask);
 
     if (sigaction(SIGSEGV, &sa, &prev_sigsegv) != 0) {

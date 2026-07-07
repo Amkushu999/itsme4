@@ -31,6 +31,10 @@ typedef struct native_handle* buffer_handle_t;
 struct camera_metadata;
 typedef struct camera_metadata camera_metadata_t;
 
+// native_handle_t — <cutils/native_handle.h> is not in the NDK public headers.
+// Forward-declare + typedef here; only used as a pointer so this is sufficient.
+typedef struct native_handle native_handle_t;
+
 // ---------------------------------------------------------------------------
 // GRALLOC usage flags
 // ---------------------------------------------------------------------------
