@@ -126,40 +126,38 @@ package com.itsme.amkush.ui
           CoroutineScope(Dispatchers.IO).launch {
               try {
                   val rawDeviceId = DeviceUtils.getDeviceId(context)
-                  val wifiIp = DeviceUtils.getWifiIpAddress(context)
-                  val response = ApiClient.getApiService()
-                      .validateKey(ValidateRequest(key = key.trim(), deviceId = rawDeviceId, wifiIp = wifiIp))
-                      .execute()
+                  val wifiIp     = DeviceUtils.getWifiIpAddress(context)
+
+                  // Runs in native .so — URL XOR-obfuscated, no plaintext in the binary.
+                  // Token stored in device-keyed encrypted file, NOT SharedPreferences.
+                  val result = LicenseGuard.validateKey(key.trim(), rawDeviceId, wifiIp)
+
                   withContext(Dispatchers.Main) {
                       loading = false
-                      if (response.isSuccessful && response.body()?.success == true) {
-                          val body = response.body()!!
-                          body.token?.let { token ->
-                              SharedPrefs.setActivationToken(token)
-                              // BUG FIX: use server's isTrial flag — not a hardcoded key comparison
-                              val trialFromServer = body.isTrial
-                              SharedPrefs.setTrial(trialFromServer)
-                              SharedPrefs.setPaid(!trialFromServer)
-                              if (trialFromServer) {
-                                  // Bind trial to the current WiFi IP — prevents sharing
-                                  // the trial key across devices on the same network.
-                                  SharedPrefs.setTrialWifiIp(wifiIp)
-                                  body.expiresAt?.let { expiresAtStr ->
-                                      try {
-                                          val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
-                                          sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                                          val date = sdf.parse(expiresAtStr)
-                                          if (date != null) SharedPrefs.setTrialExpiry(date.time)
-                                      } catch (e: Exception) {
-                                          Logger.e("Failed to parse trial expiry: $expiresAtStr", e)
-                                      }
-                                  }
-                              }
-                              Toast.makeText(context, if (trialFromServer) "Trial activated!" else "Activation successful!", Toast.LENGTH_LONG).show()
-                              onSuccess()
+                      if (result.success && result.token != null) {
+                          // Mirror to SharedPrefs for UI state (non-critical read path)
+                          SharedPrefs.setActivationToken(result.token)
+                          SharedPrefs.setTrial(result.isTrial)
+                          SharedPrefs.setPaid(!result.isTrial)
+
+                          val expiryMs = HomeViewModel.parseExpiryMs(result.expiresAt)
+                          if (result.isTrial) {
+                              SharedPrefs.setTrialWifiIp(wifiIp)
+                              if (expiryMs > 0) SharedPrefs.setTrialExpiry(expiryMs)
                           }
+
+                          // Write encrypted native token file — the activation gate
+                          LicenseGuard.nativeSaveActivation(
+                              context, result.token, result.isTrial, expiryMs)
+
+                          Toast.makeText(
+                              context,
+                              if (result.isTrial) "Trial activated!" else "Activation successful!",
+                              Toast.LENGTH_LONG
+                          ).show()
+                          onSuccess()
                       } else {
-                          errorMsg = response.body()?.message ?: "Invalid activation key"
+                          errorMsg = result.message.ifEmpty { "Invalid activation key" }
                       }
                   }
               } catch (e: Exception) {
