@@ -21,8 +21,7 @@ cmake_minimum_required(VERSION 3.22.1)
 
   find_library(LOG_LIB log)
   find_library(ANDROID_LIB android)
-  find_library(SYNC_LIB sync)
-  target_link_libraries(hookProxy ${LOG_LIB} ${ANDROID_LIB} ${SYNC_LIB})
+  target_link_libraries(hookProxy ${LOG_LIB} ${ANDROID_LIB})
 
   # ── ShadowHook ─────────────────────────────────────────────────────────────────
   # CI path: pass -DSHADOWHOOK_ROOT=<dir> containing include/ and <ABI>/lib*.

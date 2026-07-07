@@ -18,10 +18,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <errno.h>
-// sync_wait is a C function in libsync.so. <sync/sync.h> is not shipped in
-// NDK r25 public headers, so we declare it here at file scope with extern "C"
-// to prevent C++ name mangling. libsync is linked via CMakeLists find_library.
-extern "C" int sync_wait(int fd, int timeout_msec);
+#include <poll.h>
 #include <vector>
 
 #include <libyuv.h>
@@ -300,10 +297,12 @@ bool frame_inject_one(const camera3_stream_buffer_t *buf,
     if (!buf || !src || !g_libandroid) return false;
 
     // Wait out the acquire fence (if any) — max 10 ms.
+    // sync_wait() is not in NDK r25 public API stubs; use poll() instead.
+    // Sync fence FDs become readable (POLLIN) when signaled.
     if (buf->acquire_fence >= 0) {
-
-        if (sync_wait(buf->acquire_fence, 10) != 0) {
-            LOGW("acquire_fence %d timed out — skipping frame", buf->acquire_fence);
+        struct pollfd pfd = { buf->acquire_fence, POLLIN, 0 };
+        if (poll(&pfd, 1, 10) <= 0) {
+            LOGW("acquire_fence %d timed out or error — skipping frame", buf->acquire_fence);
             return false;
         }
     }
