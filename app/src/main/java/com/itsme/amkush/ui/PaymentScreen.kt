@@ -27,8 +27,8 @@ package com.itsme.amkush.ui
   import androidx.compose.ui.text.input.VisualTransformation
   import androidx.compose.ui.text.style.TextOverflow
   import androidx.compose.ui.unit.*
-  import com.itsme.amkush.network.ApiClient
-  import com.itsme.amkush.network.models.ValidateRequest
+  import com.itsme.amkush.security.LicenseGuard
+  import com.itsme.amkush.ui.HomeViewModel
   import com.itsme.amkush.utils.DeviceUtils
   import com.itsme.amkush.utils.Logger
   import com.itsme.amkush.utils.SharedPrefs
@@ -50,9 +50,7 @@ package com.itsme.amkush.ui
           val targetPackage = intent.getStringExtra("target_package")
           val targetAppName = intent.getStringExtra("target_app_name")
           SharedPrefs.init(this)
-          val isTrial = SharedPrefs.isTrial()
-          val expiry  = SharedPrefs.getTrialExpiry()
-          if (isTrial && expiry > System.currentTimeMillis()) {
+          if (LicenseGuard.nativeIsActivated(this)) {
               proceedToDashboard(targetPackage, targetAppName); return
           }
           setContent {
