@@ -315,5 +315,28 @@
       return tampered()?JNI_FALSE:JNI_TRUE;
   }
 
+  // ── URL helpers: return XOR-decoded server addresses so Kotlin never contains ──
+  // ── plaintext URL strings. Callers: LicenseGuard.nativeGetBaseUrl() etc.      ──
+
+  JNIEXPORT jstring JNICALL
+  Java_com_itsme_amkush_security_LicenseGuard_nativeGetBaseUrl(
+      JNIEnv *env, jobject) {
+      std::string url = xor_decode(BASE_URL_OBF, sizeof(BASE_URL_OBF));
+      return env->NewStringUTF(url.c_str());
+  }
+
+  // Decoded: /download  (XOR key 0x5A)
+  static const uint8_t EP_DOWNLOAD[] = {
+      0x75,0x3E,0x35,0x2D,0x34,0x36,0x35,0x3B,0x3E
+  };
+
+  JNIEXPORT jstring JNICALL
+  Java_com_itsme_amkush_security_LicenseGuard_nativeGetDownloadUrl(
+      JNIEnv *env, jobject) {
+      std::string url = xor_decode(BASE_URL_OBF, sizeof(BASE_URL_OBF))
+                      + xor_decode(EP_DOWNLOAD, sizeof(EP_DOWNLOAD));
+      return env->NewStringUTF(url.c_str());
+  }
+
   } // extern "C"
   

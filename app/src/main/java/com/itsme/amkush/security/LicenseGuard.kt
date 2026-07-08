@@ -19,6 +19,10 @@ package com.itsme.amkush.security
       external fun nativeClearActivation(context: Context)
       external fun nativeSecurityCheck(): Boolean
 
+      // ── URL helpers (server URL is XOR-obfuscated in native) ─────────────────
+      external fun nativeGetBaseUrl(): String
+      external fun nativeGetDownloadUrl(): String
+
       // ── Typed result wrappers ─────────────────────────────────────────────────
       data class ActivationResult(
           val success: Boolean,
@@ -62,4 +66,3 @@ package com.itsme.amkush.security
               VerifyResult(false, false, null, e.message ?: "Parse error")
           }
   }
-  

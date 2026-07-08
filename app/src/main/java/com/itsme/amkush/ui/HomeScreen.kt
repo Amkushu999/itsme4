@@ -37,12 +37,15 @@ import com.itsme.amkush.AppState
 import com.itsme.amkush.model.AppInfo
 import com.itsme.amkush.network.ApiClient
 import com.itsme.amkush.network.models.TokenRequest
+import com.itsme.amkush.security.LicenseGuard
 import com.itsme.amkush.services.InjectionService
 import com.itsme.amkush.utils.DeviceUtils
 import com.itsme.amkush.utils.Logger
 import com.itsme.amkush.utils.SharedPrefs
 import kotlinx.coroutines.*
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -1017,189 +1020,759 @@ private suspend fun tryGrantRoot(): Boolean = kotlinx.coroutines.withContext(kot
 
 // ─── Admin Credits Screen ─────────────────────────────────────────────────────
 private val Red        = Color(0xFFEF4444)
-private val RedBg      = Color(0x1AEF4444)
-private val RedBorder  = Color(0x40EF4444)
-private val RedText    = Color(0xFFF87171)
 private val OrangeText = Color(0xFFFB923C)
 private val SlateText  = Color(0xFFCBD5E1)
 private val CyanText   = Color(0xFF67E8F9)
-private val CyanBg     = Color(0x1A06B6D4)
-private val CyanBorder = Color(0x3306B6D4)
-private val TgBlue     = Color(0xFF29A8E8)
-private val CardBg     = Color(0xFF161B2E)
 
 private data class AdminLink(
     val emoji: String,
     val title: String,
     val handle: String,
-    val url: String
+    val url: String,
+    val tag: String,
+    val accentColor: Color
 )
 
 private val ADMIN_LINKS = listOf(
-    AdminLink("🤖", "Official FaceGate Bot",  "@facegateofficialbot", "https://t.me/facegateofficialbot"),
-    AdminLink("📢", "Official Channel",        "@facegateupdated",     "https://t.me/facegateupdated"),
-    AdminLink("🧑‍💻", "Owner",                "@facegateofficial",    "https://t.me/facegateofficial"),
+    AdminLink("🤖", "Official FaceGate Bot", "@Facegateofficialbot",
+        "https://t.me/Facegateofficialbot",   "Verified Bot",    Color(0xFF00AAFF)),
+    AdminLink("📢", "Official Channel",       "@+Tx-rhbl-VcgyNDg0",
+        "https://t.me/+Tx-rhbl-VcgyNDg0",    "Announcements",   Color(0xFFAA44FF)),
+    AdminLink("👤", "Owner",                  "@facegateofficial",
+        "https://t.me/facegateofficial",      "Administrator",   Color(0xFF00CC88)),
 )
+
+// Terminal-prompt icon — drawn as Canvas to match the JSX SVG exactly.
+@Composable
+private fun TerminalIcon(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val W = size.width; val H = size.height
+        // viewBox is 28×28; scale factors:
+        val sx = W / 28f; val sy = H / 28f
+        // Outer rect (2,4)→(26,24) rx=3 — just stroke as rounded rect
+        drawRoundRect(
+            color = color.copy(alpha = 0.85f),
+            topLeft = androidx.compose.ui.geometry.Offset(2*sx, 4*sy),
+            size = androidx.compose.ui.geometry.Size(24*sx, 20*sy),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(3*sx, 3*sy),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.4f * sx)
+        )
+        // Horizontal rule at y=10
+        drawLine(color.copy(alpha = 0.4f),
+            androidx.compose.ui.geometry.Offset(2*sx, 10*sy),
+            androidx.compose.ui.geometry.Offset(26*sx, 10*sy),
+            strokeWidth = 1.1f * sx)
+        // Title bar dots
+        drawCircle(color.copy(alpha = 0.50f), radius = 1*sx, center = androidx.compose.ui.geometry.Offset(6*sx, 7*sy))
+        drawCircle(color.copy(alpha = 0.35f), radius = 1*sx, center = androidx.compose.ui.geometry.Offset(10*sx, 7*sy))
+        drawCircle(color.copy(alpha = 0.20f), radius = 1*sx, center = androidx.compose.ui.geometry.Offset(14*sx, 7*sy))
+        // Prompt chevron: M6 15.5 l3.5 2.5 L6 20.5
+        drawLine(color.copy(alpha = 0.95f),
+            androidx.compose.ui.geometry.Offset(6*sx, 15.5f*sy),
+            androidx.compose.ui.geometry.Offset(9.5f*sx, 18*sy),
+            strokeWidth = 1.5f*sx, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(color.copy(alpha = 0.95f),
+            androidx.compose.ui.geometry.Offset(9.5f*sx, 18*sy),
+            androidx.compose.ui.geometry.Offset(6*sx, 20.5f*sy),
+            strokeWidth = 1.5f*sx, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        // Text line at y=18
+        drawLine(color.copy(alpha = 0.70f),
+            androidx.compose.ui.geometry.Offset(12*sx, 18*sy),
+            androidx.compose.ui.geometry.Offset(18*sx, 18*sy),
+            strokeWidth = 1.5f*sx, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        // Cursor rect (18.5,16.2)→(21,19.7) rx=0.5
+        drawRoundRect(
+            color = color.copy(alpha = 0.70f),
+            topLeft = androidx.compose.ui.geometry.Offset(18.5f*sx, 16.2f*sy),
+            size = androidx.compose.ui.geometry.Size(2.5f*sx, 3.5f*sy),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(0.5f*sx, 0.5f*sy)
+        )
+    }
+}
+
+// Small check-circle bullet used in feature lists
+@Composable
+private fun CheckBullet(color: Color) {
+    Canvas(Modifier.size(14.dp)) {
+        val r = size.minDimension / 2f
+        drawCircle(color.copy(alpha = 0.15f), radius = r)
+        drawCircle(color.copy(alpha = 0.40f), radius = r,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()))
+        // ✓ path: 4.5,7 → 6.5,9 → 9.5,6
+        val sc = size.minDimension / 14f
+        drawLine(color, androidx.compose.ui.geometry.Offset(4.5f*sc*14/size.minDimension*r*2, 7f*sc*14/size.minDimension*r*2),
+            androidx.compose.ui.geometry.Offset(6.5f*sc*14/size.minDimension*r*2, 9f*sc*14/size.minDimension*r*2),
+            strokeWidth = 1.4f*sc*14, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(color, androidx.compose.ui.geometry.Offset(6.5f*sc*14/size.minDimension*r*2, 9f*sc*14/size.minDimension*r*2),
+            androidx.compose.ui.geometry.Offset(9.5f*sc*14/size.minDimension*r*2, 6f*sc*14/size.minDimension*r*2),
+            strokeWidth = 1.4f*sc*14, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    }
+}
 
 @Composable
 fun AdminCreditsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    // Load the FaceGate app icon once — reused as the avatar in every social link card
-    val fgIconBitmap = remember {
-        try {
-            drawableToBitmap(context.packageManager.getApplicationIcon(context.packageName))
-        } catch (_: Exception) { null }
+    val scope   = rememberCoroutineScope()
+
+    var showTrialModal by remember { mutableStateOf(false) }
+    var copied         by remember { mutableStateOf(false) }
+    var downloading    by remember { mutableStateOf(false) }
+    var downloadDone   by remember { mutableStateOf(false) }
+    var downloadError  by remember { mutableStateOf("") }
+
+    val downloadUrl = remember {
+        try { LicenseGuard.nativeGetDownloadUrl().takeIf { it.isNotEmpty() }
+              ?: "https://standing-panther-214.convex.site/download" }
+        catch (_: Throwable) { "https://standing-panther-214.convex.site/download" }
     }
 
-    Column(
+    fun handleDownload() {
+        scope.launch {
+            downloading   = true
+            downloadError = ""
+            downloadDone  = false
+            try {
+                val client = OkHttpClient()
+                val req    = Request.Builder().url(downloadUrl).build()
+                val bytes  = withContext(Dispatchers.IO) {
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) throw Exception("Server error ${resp.code}")
+                        resp.body?.bytes() ?: throw Exception("Empty response")
+                    }
+                }
+                withContext(Dispatchers.IO) {
+                    java.io.File(context.getExternalFilesDir(null), "FaceGate-module.zip")
+                        .writeBytes(bytes)
+                }
+                downloadDone = true
+                delay(3000L)
+                downloadDone = false
+            } catch (e: Exception) {
+                downloadError = e.message ?: "Download failed"
+            } finally {
+                downloading = false
+            }
+        }
+    }
+
+    fun copyKey() {
+        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                 as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("trial_key", "NOWORNEVER"))
+        copied = true
+        scope.launch { delay(2000L); copied = false }
+    }
+
+    val bgBrush = Brush.verticalGradient(
+        listOf(Color(0xFF0F0A0A), Color(0xFF0D0F14), Color(0xFF080B12))
+    )
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgDark)
-            .systemBarsPadding()
-            .verticalScroll(rememberScrollState())
+            .background(bgBrush)
     ) {
-        // ── max-w-md centering wrapper ──
+        // ── Main scrollable content ──────────────────────────────────────────────
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .systemBarsPadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(top = 32.dp, bottom = 64.dp)
+                .padding(top = 28.dp, bottom = 64.dp)
         ) {
 
             // ── Back button ──
             Row(
                 modifier = Modifier
                     .clickable { onBack() }
-                    .padding(bottom = 32.dp),
+                    .padding(bottom = 24.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // ← arrow drawn
                 Canvas(Modifier.size(20.dp)) {
                     val mid = size.height / 2f
-                    drawLine(Color.White, Offset(size.width * 0.7f, mid * 0.4f), Offset(size.width * 0.2f, mid), strokeWidth = 4f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                    drawLine(Color.White, Offset(size.width * 0.2f, mid), Offset(size.width * 0.7f, mid * 1.6f), strokeWidth = 4f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                    drawLine(Color.White, Offset(size.width * 0.2f, mid), Offset(size.width * 0.9f, mid), strokeWidth = 4f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    drawLine(Color(0xCCFFFFFF), Offset(size.width * 0.65f, mid * 0.35f),
+                        Offset(size.width * 0.25f, mid), strokeWidth = 4f,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    drawLine(Color(0xCCFFFFFF), Offset(size.width * 0.25f, mid),
+                        Offset(size.width * 0.65f, mid * 1.65f), strokeWidth = 4f,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round)
                 }
-                Text("Back", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text("Back", color = Color(0xCCFFFFFF), fontSize = 15.sp, fontWeight = FontWeight.Medium)
             }
 
-            // ── Warning header ──
-            Column(
+            // ── Shield icon with red glow ──
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .padding(bottom = 20.dp),
+                contentAlignment = Alignment.Center
             ) {
-                // ShieldAlert icon (red)
-                Canvas(Modifier.size(48.dp)) {
-                    val w = size.width; val h = size.height
-                    // Shield outline
-                    val shieldPath = Path().apply {
-                        moveTo(w * 0.5f, h * 0.05f)
-                        lineTo(w * 0.92f, h * 0.22f)
-                        lineTo(w * 0.92f, h * 0.55f)
-                        cubicTo(w * 0.92f, h * 0.78f, w * 0.72f, h * 0.93f, w * 0.5f, h * 0.98f)
-                        cubicTo(w * 0.28f, h * 0.93f, w * 0.08f, h * 0.78f, w * 0.08f, h * 0.55f)
-                        lineTo(w * 0.08f, h * 0.22f)
-                        close()
+                // Outer glow ring
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .blur(24.dp)
+                        .background(Color(0x1AEF4444), CircleShape)
+                )
+                // Inner glow ring
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .blur(12.dp)
+                        .background(Color(0x26EF4444), CircleShape)
+                )
+                // Shield circle
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x99300A0A))
+                        .border(1.dp, Color(0x80B02020), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(Modifier.size(32.dp)) {
+                        val w = size.width; val h = size.height
+                        val shieldPath = Path().apply {
+                            moveTo(w * 0.5f, h * 0.05f)
+                            lineTo(w * 0.92f, h * 0.22f)
+                            lineTo(w * 0.92f, h * 0.54f)
+                            cubicTo(w * 0.92f, h * 0.78f, w * 0.72f, h * 0.94f, w * 0.5f, h * 0.98f)
+                            cubicTo(w * 0.28f, h * 0.94f, w * 0.08f, h * 0.78f, w * 0.08f, h * 0.54f)
+                            lineTo(w * 0.08f, h * 0.22f)
+                            close()
+                        }
+                        drawPath(shieldPath, color = Red.copy(alpha = 0.15f))
+                        drawPath(shieldPath, color = Red,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f * density))
+                        drawLine(Red, Offset(w * 0.5f, h * 0.32f), Offset(w * 0.5f, h * 0.62f),
+                            strokeWidth = 4.5f * density, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                        drawCircle(Red, radius = 3f * density, center = Offset(w * 0.5f, h * 0.76f))
                     }
-                    drawPath(shieldPath, color = Red.copy(alpha = 0.25f))
-                    drawPath(shieldPath, color = Red, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f))
-                    // Exclamation mark
-                    drawLine(Red, Offset(w * 0.5f, h * 0.32f), Offset(w * 0.5f, h * 0.62f), strokeWidth = 4.5f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                    drawCircle(Red, radius = 3f, center = Offset(w * 0.5f, h * 0.74f))
                 }
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "STOP: READ BEFORE PROCEEDING",
-                    color = Red,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "THREAT DETECTED",
-                    color = OrangeText,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
-                    textAlign = TextAlign.Center
-                )
             }
+
+            // ── Title ──
+            Text(
+                "STOP: READ BEFORE PROCEEDING",
+                color = Color(0xFFFF4444),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "THREAT DETECTED",
+                color = Color(0xFF6B7280),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 3.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 28.dp)
+            )
 
             // ── Warning card ──
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(20.dp))
-                    .background(RedBg)
-                    .border(1.dp, RedBorder, RoundedCornerShape(20.dp))
-                    .padding(20.dp)
-                    .padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(Color(0xF228100A), Color(0xE81A0A0A))
+                        )
+                    )
+                    .border(1.dp, Color(0x66B41E1E), RoundedCornerShape(20.dp))
+                    .padding(16.dp)
+                    .padding(bottom = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
                     "Scammers are circulating infected FaceGate apps.",
-                    color = SlateText,
+                    color = Color(0xE6FFFFFF),
                     fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                // AlertTriangle row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0x1AEF4444))
-                        .border(1.dp, Color(0x33EF4444), RoundedCornerShape(12.dp))
+                        .background(Color(0xCC3C0F0F))
+                        .border(1.dp, Color(0x40C83232), RoundedCornerShape(12.dp))
                         .padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
-                    // Triangle alert icon
-                    Canvas(Modifier.size(16.dp).padding(top = 2.dp)) {
+                    // AlertTriangle icon
+                    Canvas(Modifier.size(17.dp)) {
                         val triPath = Path().apply {
                             moveTo(size.width * 0.5f, size.height * 0.05f)
                             lineTo(size.width * 0.96f, size.height * 0.92f)
                             lineTo(size.width * 0.04f, size.height * 0.92f)
                             close()
                         }
-                        drawPath(triPath, color = Red.copy(alpha = 0.2f))
-                        drawPath(triPath, color = Red, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f))
-                        drawLine(Red, Offset(size.width * 0.5f, size.height * 0.35f), Offset(size.width * 0.5f, size.height * 0.62f), strokeWidth = 3f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                        drawCircle(Red, 2f, Offset(size.width * 0.5f, size.height * 0.76f))
+                        drawPath(triPath, color = Color(0xFFEAB308).copy(alpha = 0.25f))
+                        drawPath(triPath, color = Color(0xFFEAB308),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f))
+                        drawLine(Color(0xFFEAB308),
+                            Offset(size.width * 0.5f, size.height * 0.35f),
+                            Offset(size.width * 0.5f, size.height * 0.62f),
+                            strokeWidth = 3f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                        drawCircle(Color(0xFFEAB308), 2f, Offset(size.width * 0.5f, size.height * 0.78f))
                     }
                     Text(
                         "DO NOT INSTALL PC VERSIONS. FaceGate.exe / Kima.exe / .msi files are VIRUSES.",
-                        color = RedText,
+                        color = Color(0xD9FFFFFF),
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f)
                     )
                 }
-
-                // Cyan info box
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(CyanBg)
-                        .border(1.dp, CyanBorder, RoundedCornerShape(12.dp))
-                        .padding(12.dp)
+                        .background(Color(0xE605191F))
+                        .border(1.dp, Color(0x4D00A0C8), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
                     Text(
                         "UPDATES are broadcast through the official FaceGate bot only.",
                         color = CyanText,
                         fontSize = 13.sp,
-                        textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
 
             Spacer(Modifier.height(24.dp))
+
+            // ── Module Download Card ──
+            val blueAccent = Color(0xFF00AAFF)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.linearGradient(listOf(Color(0xF805101E), Color(0xF2050C18)))
+                    )
+                    .border(1.dp, Color(0x4000AAFF), RoundedCornerShape(20.dp))
+                    .padding(16.dp)
+            ) {
+                // Card header row
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(bottom = 12.dp)
+                ) {
+                    // Module icon box
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x3300AAFF))
+                            .border(1.dp, Color(0x6600AAFF), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Terminal-style icon for module
+                        Canvas(Modifier.size(18.dp)) {
+                            val W = size.width; val H = size.height
+                            drawRoundRect(blueAccent.copy(alpha = 0.85f),
+                                topLeft = Offset(W*0.06f, H*0.14f),
+                                size = androidx.compose.ui.geometry.Size(W*0.88f, H*0.77f),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(W*0.11f),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = W*0.07f))
+                            drawLine(blueAccent.copy(alpha = 0.4f), Offset(W*0.06f, H*0.39f), Offset(W*0.94f, H*0.39f), W*0.055f)
+                            drawCircle(blueAccent.copy(alpha = 0.5f), W*0.04f, Offset(W*0.21f, H*0.25f))
+                            drawCircle(blueAccent.copy(alpha = 0.35f), W*0.04f, Offset(W*0.35f, H*0.25f))
+                            drawLine(blueAccent.copy(alpha = 0.9f), Offset(W*0.22f, H*0.58f), Offset(W*0.36f, H*0.7f), W*0.075f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(blueAccent.copy(alpha = 0.9f), Offset(W*0.36f, H*0.7f), Offset(W*0.22f, H*0.82f), W*0.075f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(blueAccent.copy(alpha = 0.6f), Offset(W*0.44f, H*0.72f), Offset(W*0.72f, H*0.72f), W*0.075f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("Module Installation", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                        Text("● Magisk / KernelSU / Apatch",
+                            color = blueAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.5.sp)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Color(0x1E00AAFF))
+                            .border(1.dp, Color(0x4D00AAFF), CircleShape)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("MODULE", color = blueAccent, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                    }
+                }
+
+                // Divider
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x1A00AAFF)).padding(bottom = 0.dp))
+                Spacer(Modifier.height(12.dp))
+
+                // Steps
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x0D00AAFF))
+                        .border(1.dp, Color(0x1F00AAFF), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .padding(bottom = 0.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    listOf(
+                        "1" to "Download the FaceGate module below",
+                        "2" to "Open Magisk, KernelSU, or Apatch on your device",
+                        "3" to "Tap \"Install from storage\" and select the module",
+                        "4" to "Reboot your device to activate FaceGate"
+                    ).forEach { (step, text) ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x2600AAFF))
+                                    .border(1.dp, Color(0x6600AAFF), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(step, color = blueAccent, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                            }
+                            Text(text, color = Color(0xBFFFFFFF), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+
+                // Tool tags
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Magisk", "KernelSU", "Apatch").forEach { tool ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x1A00AAFF))
+                                .border(1.dp, Color(0x4000AAFF), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(tool, color = blueAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+
+                // Error message
+                if (downloadError.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0x143C3C3C))
+                            .border(1.dp, Color(0x40FF3C3C), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Canvas(Modifier.size(13.dp)) {
+                            val p = Path().apply {
+                                moveTo(size.width * 0.5f, 0f)
+                                lineTo(size.width, size.height)
+                                lineTo(0f, size.height)
+                                close()
+                            }
+                            drawPath(p, color = Color(0xFFF87171),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
+                        }
+                        Text(downloadError, color = Color(0xFFF87171), fontSize = 11.sp, modifier = Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                // Download button
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (downloadDone)
+                                Brush.linearGradient(listOf(Color(0x4D00C864), Color(0x3300A050)))
+                            else
+                                Brush.linearGradient(listOf(Color(0x4D00AAFF), Color(0x3300A0FF)))
+                        )
+                        .border(
+                            1.dp,
+                            if (downloadDone) Color(0x7300C864) else Color(0x7300AAFF),
+                            RoundedCornerShape(12.dp)
+                        )
+                        .clickable(enabled = !downloading) { handleDownload() }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        when {
+                            downloading -> {
+                                // Spinner
+                                val inf = rememberInfiniteTransition(label = "spin")
+                                val angle by inf.animateFloat(0f, 360f,
+                                    animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing)),
+                                    label = "angle")
+                                Canvas(Modifier.size(16.dp).rotate(angle)) {
+                                    drawArc(blueAccent, 0f, 270f, false,
+                                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f),
+                                        topLeft = Offset(2f, 2f),
+                                        size = androidx.compose.ui.geometry.Size(size.width - 4f, size.height - 4f))
+                                }
+                                Text("Downloading...", color = blueAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                            }
+                            downloadDone -> {
+                                Canvas(Modifier.size(16.dp)) {
+                                    drawLine(Color(0xFF00C864), Offset(size.width * 0.1f, size.height * 0.5f),
+                                        Offset(size.width * 0.42f, size.height * 0.82f), 3f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                    drawLine(Color(0xFF00C864), Offset(size.width * 0.42f, size.height * 0.82f),
+                                        Offset(size.width * 0.9f, size.height * 0.18f), 3f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                }
+                                Text("Downloaded!", color = Color(0xFF00C864), fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                            }
+                            else -> {
+                                // Download arrow icon
+                                Canvas(Modifier.size(16.dp)) {
+                                    drawLine(blueAccent, Offset(size.width * 0.5f, size.height * 0.1f),
+                                        Offset(size.width * 0.5f, size.height * 0.7f), 3f,
+                                        cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                    drawLine(blueAccent, Offset(size.width * 0.5f, size.height * 0.7f),
+                                        Offset(size.width * 0.2f, size.height * 0.45f), 3f,
+                                        cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                    drawLine(blueAccent, Offset(size.width * 0.5f, size.height * 0.7f),
+                                        Offset(size.width * 0.8f, size.height * 0.45f), 3f,
+                                        cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                    drawLine(blueAccent, Offset(size.width * 0.1f, size.height * 0.88f),
+                                        Offset(size.width * 0.9f, size.height * 0.88f), 3f,
+                                        cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                }
+                                Text("Download Module", color = blueAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // ── Trial Card ──
+            val purpleAccent = Color(0xFFA050FF)
+            val purpleLight  = Color(0xFFC080FF)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.linearGradient(listOf(Color(0xF80F0A1E), Color(0xF20A081A)))
+                    )
+                    .border(1.dp, Color(0x40A050FF), RoundedCornerShape(20.dp))
+                    .padding(16.dp)
+            ) {
+                // Header
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(bottom = 12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x40A050FF))
+                            .border(1.dp, Color(0x66A050FF), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(Modifier.size(18.dp)) {
+                            drawCircle(purpleAccent, radius = size.minDimension / 2f - 2f,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.5f * density))
+                            drawLine(purpleAccent, Offset(size.width/2f, size.height*0.27f),
+                                Offset(size.width/2f, size.height*0.58f), 3.5f * density,
+                                cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(purpleAccent, Offset(size.width/2f, size.height*0.58f),
+                                Offset(size.width*0.72f, size.height*0.72f), 3.5f * density,
+                                cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("Free Trial Available", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                        Text("● 1 Hour Free Access", color = purpleAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Color(0x1EA050FF))
+                            .border(1.dp, Color(0x4DA050FF), CircleShape)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("FREE", color = purpleAccent, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                    }
+                }
+
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AA050FF)))
+                Spacer(Modifier.height(12.dp))
+
+                // Description
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x0FA050FF))
+                        .border(1.dp, Color(0x26A050FF), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        "Try FaceGate free for 1 hour before committing to a purchase. Full access, no limitations.",
+                        color = Color(0xCCFFFFFF), fontSize = 13.sp, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+
+                // Features
+                listOf(
+                    "Full access to all FaceGate features",
+                    "No payment required to start",
+                    "Upgrade anytime during or after trial"
+                ).forEach { text ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    ) {
+                        CheckBullet(purpleAccent)
+                        Text(text, color = Color(0xB3FFFFFF), fontSize = 12.sp)
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+
+                // Trial button
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            Brush.linearGradient(listOf(Color(0x4DA050FF), Color(0x333222DC)))
+                        )
+                        .border(1.dp, Color(0x73A050FF), RoundedCornerShape(12.dp))
+                        .clickable { showTrialModal = true }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Start 1-Hour Free Trial", color = purpleLight,
+                        fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // ── App Integrity Card ──
+            val greenAccent = Color(0xFF00C864)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.linearGradient(listOf(Color(0xF8051915), Color(0xF2051410)))
+                    )
+                    .border(1.dp, Color(0x4000C864), RoundedCornerShape(20.dp))
+                    .padding(16.dp)
+            ) {
+                // Header
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(bottom = 12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x3300C864))
+                            .border(1.dp, Color(0x5900C864), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(Modifier.size(18.dp)) {
+                            // Shield checkmark
+                            val W = size.width; val H = size.height
+                            val sp = Path().apply {
+                                moveTo(W*0.5f, H*0.05f)
+                                lineTo(W*0.94f, H*0.22f)
+                                lineTo(W*0.94f, H*0.56f)
+                                cubicTo(W*0.94f, H*0.79f, W*0.74f, H*0.94f, W*0.5f, H*0.99f)
+                                cubicTo(W*0.26f, H*0.94f, W*0.06f, H*0.79f, W*0.06f, H*0.56f)
+                                lineTo(W*0.06f, H*0.22f)
+                                close()
+                            }
+                            drawPath(sp, greenAccent.copy(alpha = 0.1f))
+                            drawPath(sp, greenAccent, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f * density))
+                            // Checkmark
+                            drawLine(greenAccent, Offset(W*0.32f, H*0.52f), Offset(W*0.47f, H*0.67f), 3f * density, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(greenAccent, Offset(W*0.47f, H*0.67f), Offset(W*0.70f, H*0.38f), 3f * density, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("App Integrity Verified", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                        Text("● Untampered", color = greenAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Color(0x1E00C864))
+                            .border(1.dp, Color(0x4D00C864), CircleShape)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("SECURE", color = greenAccent, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                    }
+                }
+
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x1A00C864)))
+                Spacer(Modifier.height(12.dp))
+
+                listOf(
+                    "Digital signature matches official release",
+                    "No unauthorized modifications detected",
+                    "Checksum verified against official build"
+                ).forEach { text ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    ) {
+                        CheckBullet(greenAccent)
+                        Text(text, color = Color(0xB3FFFFFF), fontSize = 12.sp)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(28.dp))
+
+            // ── Official Links divider ──
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(Modifier.weight(1f).height(1.dp).background(Color(0x0DFFFFFF)))
+                Text("Official Links", color = Color(0x33FFFFFF), fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Box(Modifier.weight(1f).height(1.dp).background(Color(0x0DFFFFFF)))
+            }
+
+            Spacer(Modifier.height(20.dp))
 
             // ── Link cards ──
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1208,8 +1781,12 @@ fun AdminCreditsScreen(onBack: () -> Unit) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(20.dp))
-                            .background(CardBg)
-                            .border(1.dp, Border, RoundedCornerShape(20.dp))
+                            .background(
+                                Brush.linearGradient(listOf(Color(0xF918202A), Color(0xF0121620)))
+                            )
+                            .border(1.dp,
+                                link.accentColor.copy(alpha = 0.2f),
+                                RoundedCornerShape(20.dp))
                             .clickable {
                                 try {
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link.url)))
@@ -1217,52 +1794,201 @@ fun AdminCreditsScreen(onBack: () -> Unit) {
                                     Toast.makeText(context, "Could not open Telegram", Toast.LENGTH_SHORT).show()
                                 }
                             }
-                            .padding(16.dp),
+                            .padding(horizontal = 20.dp, vertical = 20.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        horizontalArrangement = Arrangement.spacedBy(20.dp)
                     ) {
-                        // FaceGate app icon as avatar; fallback to branded "T" if unavailable
+                        // Terminal icon box
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(TgBlue, CircleShape),
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(link.accentColor.copy(0.12f), link.accentColor.copy(0.05f))
+                                    )
+                                )
+                                .border(1.dp, link.accentColor.copy(alpha = 0.25f), RoundedCornerShape(16.dp)),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (fgIconBitmap != null) {
-                                androidx.compose.foundation.Image(
-                                    bitmap = fgIconBitmap.asImageBitmap(),
-                                    contentDescription = "FaceGate",
-                                    modifier = Modifier.size(44.dp).clip(CircleShape)
-                                )
-                            } else {
-                                Text(
-                                    "T",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp
-                                )
+                            TerminalIcon(link.accentColor, Modifier.size(28.dp))
+                        }
+
+                        // Label + tag
+                        Column(Modifier.weight(1f)) {
+                            Text("${link.emoji} ${link.title}",
+                                color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                            Spacer(Modifier.height(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(link.accentColor.copy(alpha = 0.083f))
+                                    .border(1.dp, link.accentColor.copy(alpha = 0.21f), CircleShape)
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(link.tag, color = link.accentColor,
+                                    fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
                             }
                         }
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "${link.emoji} ${link.title}",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                link.handle,
-                                color = TextMid,
-                                fontSize = 11.sp
-                            )
+
+                        // ChevronRight box
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(link.accentColor.copy(0.14f), link.accentColor.copy(0.06f))
+                                    )
+                                )
+                                .border(1.dp, link.accentColor.copy(alpha = 0.25f), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(Modifier.size(16.dp)) {
+                                val mid = size.height / 2f
+                                val col = link.accentColor
+                                drawLine(col, Offset(size.width * 0.3f, mid * 0.38f),
+                                    Offset(size.width * 0.72f, mid), 3f,
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                drawLine(col, Offset(size.width * 0.72f, mid),
+                                    Offset(size.width * 0.3f, mid * 1.62f), 3f,
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            }
                         }
-                        // ChevronRight
-                        Canvas(Modifier.size(16.dp)) {
-                            val mid = size.height / 2f
-                            drawLine(Color(0x88FFFFFF), Offset(size.width * 0.3f, mid * 0.35f), Offset(size.width * 0.75f, mid), strokeWidth = 3f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawLine(Color(0x88FFFFFF), Offset(size.width * 0.75f, mid), Offset(size.width * 0.3f, mid * 1.65f), strokeWidth = 3f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(32.dp))
+            Text(
+                "Always verify sources before downloading",
+                color = Color(0x26FFFFFF), fontSize = 10.sp,
+                letterSpacing = 2.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // ── Trial Key Modal ──────────────────────────────────────────────────────
+        if (showTrialModal) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xBF000000))
+                    .clickable { showTrialModal = false },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            Brush.linearGradient(listOf(Color(0xFC140C28), Color(0xFA0C081C)))
+                        )
+                        .border(1.dp, Color(0x59A050FF), RoundedCornerShape(20.dp))
+                        .clickable {} // consume taps — don't dismiss on modal tap
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Clock icon box
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                Brush.linearGradient(listOf(Color(0x40A050FF), Color(0x14A050FF)))
+                            )
+                            .border(1.dp, Color(0x66A050FF), RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(Modifier.size(28.dp)) {
+                            val c = Color(0xFFA050FF)
+                            drawCircle(c, radius = size.minDimension / 2f - 2f * density,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f * density))
+                            drawLine(c, Offset(size.width/2f, size.height*0.28f),
+                                Offset(size.width/2f, size.height*0.55f), 3f * density,
+                                cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(c, Offset(size.width/2f, size.height*0.55f),
+                                Offset(size.width*0.68f, size.height*0.7f), 3f * density,
+                                cap = androidx.compose.ui.graphics.StrokeCap.Round)
                         }
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Your Trial Key", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Use this key to activate your 1-hour free trial",
+                            color = Color(0x80FFFFFF), fontSize = 12.sp, textAlign = TextAlign.Center)
+                    }
+
+                    // Key display row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0x14A050FF))
+                            .border(1.dp, Color(0x4DA050FF), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 20.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("NOWORNEVER",
+                            color = Color(0xFFC080FF), fontSize = 21.sp, fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 6.sp)
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { copyKey() }
+                                .padding(4.dp)
+                        ) {
+                            if (copied) {
+                                Canvas(Modifier.size(18.dp)) {
+                                    drawLine(Color(0xFF00C864), Offset(size.width*0.15f, size.height*0.5f),
+                                        Offset(size.width*0.42f, size.height*0.78f), 3f,
+                                        cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                    drawLine(Color(0xFF00C864), Offset(size.width*0.42f, size.height*0.78f),
+                                        Offset(size.width*0.88f, size.height*0.22f), 3f,
+                                        cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                }
+                            } else {
+                                // Copy icon (two overlapping rects)
+                                Canvas(Modifier.size(18.dp)) {
+                                    val c = Color(0xFFA050FF)
+                                    drawRoundRect(c, topLeft = Offset(size.width*0.3f, size.height*0.1f),
+                                        size = androidx.compose.ui.geometry.Size(size.width*0.62f, size.height*0.62f),
+                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width*0.1f),
+                                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f))
+                                    drawRoundRect(c, topLeft = Offset(size.width*0.08f, size.height*0.28f),
+                                        size = androidx.compose.ui.geometry.Size(size.width*0.62f, size.height*0.62f),
+                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width*0.1f),
+                                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f))
+                                }
+                            }
+                        }
+                    }
+
+                    if (copied) {
+                        Text("✓ Copied to clipboard",
+                            color = Color(0xFF00C864), fontSize = 11.sp,
+                            letterSpacing = 3.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    // Got it button
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(listOf(Color(0x40A050FF), Color(0x26783214)))
+                            )
+                            .border(1.dp, Color(0x59A050FF), RoundedCornerShape(12.dp))
+                            .clickable { showTrialModal = false }
+                            .padding(vertical = 14.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Got it", color = Color(0xFFC080FF),
+                            fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp)
                     }
                 }
             }

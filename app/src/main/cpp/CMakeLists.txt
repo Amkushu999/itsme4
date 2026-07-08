@@ -94,14 +94,17 @@ cmake_minimum_required(VERSION 3.22.1)
 
   # ── frame_producer.so ─────────────────────────────────────────────────────────
   # Includes activation.cpp: native license enforcement + JNI HTTP + anti-tamper.
+  # Includes license/license_client.cpp: HMAC-verified license client (APK side).
   # URLs are XOR-obfuscated; no plaintext server address in the binary.
   add_library(frame_producer SHARED
       frame_producer.cpp
       activation.cpp
+      license/license_client.cpp
   )
 
   target_include_directories(frame_producer PRIVATE
       "${FFMPEG_ABI_DIR}/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/license"
   )
 
   target_compile_options(frame_producer PRIVATE
@@ -115,4 +118,3 @@ cmake_minimum_required(VERSION 3.22.1)
   )
 
   target_compile_features(frame_producer PRIVATE cxx_std_17)
-  

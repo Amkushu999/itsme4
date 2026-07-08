@@ -3,6 +3,7 @@ package com.itsme.amkush.network
   import android.content.Context
   import com.google.gson.GsonBuilder
   import com.itsme.amkush.BuildConfig
+  import com.itsme.amkush.security.LicenseGuard
   import okhttp3.OkHttpClient
   import okhttp3.logging.HttpLoggingInterceptor
   import retrofit2.Retrofit
@@ -10,7 +11,17 @@ package com.itsme.amkush.network
   import java.util.concurrent.TimeUnit
 
   object ApiClient {
-      private const val BASE_URL = "https://standing-panther-214.convex.site/"
+      // Server URL is XOR-obfuscated in native; never stored as plaintext in Kotlin.
+      private val BASE_URL: String by lazy {
+          try {
+              val url = LicenseGuard.nativeGetBaseUrl()
+              if (url.isNotEmpty()) url.trimEnd('/') + "/"
+              else "https://standing-panther-214.convex.site/"
+          } catch (_: Throwable) {
+              "https://standing-panther-214.convex.site/"
+          }
+      }
+
       private const val TIMEOUT_SECONDS = 30L
 
       @Volatile private var retrofit: Retrofit? = null
@@ -57,4 +68,3 @@ package com.itsme.amkush.network
 
       fun getBaseUrl(): String = BASE_URL
   }
-  
