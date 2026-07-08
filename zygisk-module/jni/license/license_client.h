@@ -31,7 +31,7 @@
 #endif
 
 #ifndef FACEGATE_SERVER_URL
-#define FACEGATE_SERVER_URL "https://standing-panther-214.convex.site"
+#define FACEGATE_SERVER_URL "https://grateful-mule-939.convex.site"
 #endif
 
 #define FACEGATE_TRIAL_KEY  "NOWORNEVER"
