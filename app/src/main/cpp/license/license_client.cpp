@@ -880,7 +880,9 @@ Java_com_itsme_amkush_license_LicenseClient_nativeActivate(
         return env->NewStringUTF("");
     }
 
-    LOGI("nativeActivate: key=%s device=%s", key.c_str(), fp.device_id.c_str());
+    // Never log raw key or full device_id — redact to avoid credential leakage via logcat.
+    LOGI("nativeActivate: key_len=%zu dev_prefix=%.4s...", key.size(),
+         fp.device_id.size() >= 4 ? fp.device_id.c_str() : "???");
 
     std::string rid     = gen_rid(env);
     std::string body    = build_activate_body(fp, key, rid);

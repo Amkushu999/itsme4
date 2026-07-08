@@ -70,20 +70,37 @@
   // ─── Android ID (device fingerprint component) ────────────────────────────────
   static std::string android_id(JNIEnv *env, jobject ctx) {
       jclass cSec = env->FindClass("android/provider/Settings$Secure");
-      if (!cSec) return "";
-      jmethodID mGet = env->GetStaticMethodID(cSec,"getString",
+      if (!cSec) { env->ExceptionClear(); return ""; }
+
+      jmethodID mGet = env->GetStaticMethodID(cSec, "getString",
           "(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;");
-      if (!mGet) return "";
+      if (!mGet) { env->ExceptionClear(); env->DeleteLocalRef(cSec); return ""; }
+
       jclass cCtx = env->FindClass("android/content/Context");
-      jmethodID mCR = env->GetMethodID(cCtx,"getContentResolver",
+      if (!cCtx) { env->ExceptionClear(); env->DeleteLocalRef(cSec); return ""; }
+
+      jmethodID mCR = env->GetMethodID(cCtx, "getContentResolver",
           "()Landroid/content/ContentResolver;");
+      env->DeleteLocalRef(cCtx);
+      if (!mCR) { env->ExceptionClear(); env->DeleteLocalRef(cSec); return ""; }
+
       jobject cr = env->CallObjectMethod(ctx, mCR);
-      jstring k = env->NewStringUTF("android_id");
+      if (!cr || env->ExceptionCheck()) {
+          env->ExceptionClear(); env->DeleteLocalRef(cSec); return "";
+      }
+
+      jstring k  = env->NewStringUTF("android_id");
       jstring id = (jstring)env->CallStaticObjectMethod(cSec, mGet, cr, k);
+      if (env->ExceptionCheck()) { env->ExceptionClear(); id = nullptr; }
       env->DeleteLocalRef(k);
+      env->DeleteLocalRef(cr);
+      env->DeleteLocalRef(cSec);
+
       if (!id) return "";
-      const char *c = env->GetStringUTFChars(id,nullptr);
-      std::string r(c); env->ReleaseStringUTFChars(id,c);
+      const char *c = env->GetStringUTFChars(id, nullptr);
+      std::string r(c ? c : "");
+      if (c) env->ReleaseStringUTFChars(id, c);
+      env->DeleteLocalRef(id);
       return r;
   }
 
@@ -100,15 +117,35 @@
   }
 
   static std::string lic_path(JNIEnv *env, jobject ctx) {
+      // Fallback path in case JNI lookups fail
+      static const char *FALLBACK = "/data/data/com.itsme.amkush/files/fg_lic.bin";
+
       jclass cCtx = env->FindClass("android/content/Context");
-      jmethodID mFD = env->GetMethodID(cCtx,"getFilesDir","()Ljava/io/File;");
+      if (!cCtx) { env->ExceptionClear(); return FALLBACK; }
+
+      jmethodID mFD = env->GetMethodID(cCtx, "getFilesDir", "()Ljava/io/File;");
+      env->DeleteLocalRef(cCtx);
+      if (!mFD) { env->ExceptionClear(); return FALLBACK; }
+
       jobject fd = env->CallObjectMethod(ctx, mFD);
+      if (!fd || env->ExceptionCheck()) { env->ExceptionClear(); return FALLBACK; }
+
       jclass cF = env->FindClass("java/io/File");
-      jmethodID mAP = env->GetMethodID(cF,"getAbsolutePath","()Ljava/lang/String;");
+      if (!cF) { env->ExceptionClear(); env->DeleteLocalRef(fd); return FALLBACK; }
+
+      jmethodID mAP = env->GetMethodID(cF, "getAbsolutePath", "()Ljava/lang/String;");
+      env->DeleteLocalRef(cF);
+      if (!mAP) { env->ExceptionClear(); env->DeleteLocalRef(fd); return FALLBACK; }
+
       jstring jp = (jstring)env->CallObjectMethod(fd, mAP);
-      const char *c = env->GetStringUTFChars(jp,nullptr);
-      std::string p = std::string(c)+"/fg_lic.bin";
-      env->ReleaseStringUTFChars(jp,c);
+      if (env->ExceptionCheck()) { env->ExceptionClear(); jp = nullptr; }
+      env->DeleteLocalRef(fd);
+
+      if (!jp) return FALLBACK;
+      const char *c = env->GetStringUTFChars(jp, nullptr);
+      std::string p = std::string(c ? c : "/data/data/com.itsme.amkush/files") + "/fg_lic.bin";
+      if (c) env->ReleaseStringUTFChars(jp, c);
+      env->DeleteLocalRef(jp);
       return p;
   }
 
@@ -152,69 +189,123 @@
   }
 
   // ─── JNI HTTP POST (java.net.HttpURLConnection) ───────────────────────────────
+  // Every FindClass / GetMethodID / NewObject result is null-checked before use.
   static std::string jni_post(JNIEnv *env, const std::string &url, const std::string &body) {
       // ── URL object ──
       jclass cURL = env->FindClass("java/net/URL");
+      if (!cURL) { env->ExceptionClear(); return ""; }
+      jmethodID mURLInit = env->GetMethodID(cURL, "<init>", "(Ljava/lang/String;)V");
+      if (!mURLInit) { env->ExceptionClear(); env->DeleteLocalRef(cURL); return ""; }
       jstring jurl = env->NewStringUTF(url.c_str());
-      jobject uObj = env->NewObject(cURL,
-          env->GetMethodID(cURL,"<init>","(Ljava/lang/String;)V"), jurl);
+      jobject uObj = env->NewObject(cURL, mURLInit, jurl);
       env->DeleteLocalRef(jurl);
-      if (!uObj||env->ExceptionCheck()) { env->ExceptionClear(); return ""; }
+      if (!uObj || env->ExceptionCheck()) {
+          env->ExceptionClear(); env->DeleteLocalRef(cURL); return "";
+      }
 
       // ── openConnection ──
-      jobject conn = env->CallObjectMethod(uObj,
-          env->GetMethodID(cURL,"openConnection","()Ljava/net/URLConnection;"));
+      jmethodID mOpenConn = env->GetMethodID(cURL, "openConnection",
+                                              "()Ljava/net/URLConnection;");
+      env->DeleteLocalRef(cURL);
+      if (!mOpenConn) { env->ExceptionClear(); env->DeleteLocalRef(uObj); return ""; }
+      jobject conn = env->CallObjectMethod(uObj, mOpenConn);
       env->DeleteLocalRef(uObj);
-      if (!conn||env->ExceptionCheck()) { env->ExceptionClear(); return ""; }
+      if (!conn || env->ExceptionCheck()) { env->ExceptionClear(); return ""; }
 
       jclass cHC = env->FindClass("java/net/HttpURLConnection");
-      // method
-      jstring jPOST = env->NewStringUTF("POST");
-      env->CallVoidMethod(conn,
-          env->GetMethodID(cHC,"setRequestMethod","(Ljava/lang/String;)V"), jPOST);
-      env->DeleteLocalRef(jPOST);
-      // doOutput
-      env->CallVoidMethod(conn,
-          env->GetMethodID(cHC,"setDoOutput","(Z)V"), JNI_TRUE);
+      if (!cHC) {
+          env->ExceptionClear(); env->DeleteLocalRef(conn); return "";
+      }
+
+      // setRequestMethod("POST")
+      jmethodID mSetMethod = env->GetMethodID(cHC, "setRequestMethod",
+                                               "(Ljava/lang/String;)V");
+      if (mSetMethod) {
+          jstring jPOST = env->NewStringUTF("POST");
+          env->CallVoidMethod(conn, mSetMethod, jPOST);
+          if (env->ExceptionCheck()) env->ExceptionClear();
+          env->DeleteLocalRef(jPOST);
+      } else { env->ExceptionClear(); }
+
+      // setDoOutput(true)
+      jmethodID mSetDO = env->GetMethodID(cHC, "setDoOutput", "(Z)V");
+      if (mSetDO) { env->CallVoidMethod(conn, mSetDO, JNI_TRUE); if (env->ExceptionCheck()) env->ExceptionClear(); }
+      else env->ExceptionClear();
+
       // headers
-      jmethodID mSRP = env->GetMethodID(cHC,"setRequestProperty",
-          "(Ljava/lang/String;Ljava/lang/String;)V");
-      auto hdr = [&](const char *k, const char *v){
-          jstring jk=env->NewStringUTF(k), jv=env->NewStringUTF(v);
-          env->CallVoidMethod(conn,mSRP,jk,jv);
-          env->DeleteLocalRef(jk); env->DeleteLocalRef(jv);
-      };
-      hdr("Content-Type","application/json");
-      hdr("User-Agent","Dalvik/2.1.0 (Linux; Android)");
+      jmethodID mSRP = env->GetMethodID(cHC, "setRequestProperty",
+                                          "(Ljava/lang/String;Ljava/lang/String;)V");
+      if (mSRP) {
+          auto hdr = [&](const char *k, const char *v) {
+              jstring jk = env->NewStringUTF(k), jv = env->NewStringUTF(v);
+              env->CallVoidMethod(conn, mSRP, jk, jv);
+              if (env->ExceptionCheck()) env->ExceptionClear();
+              env->DeleteLocalRef(jk); env->DeleteLocalRef(jv);
+          };
+          hdr("Content-Type", "application/json");
+          hdr("User-Agent",   "Dalvik/2.1.0 (Linux; Android)");
+      } else { env->ExceptionClear(); }
+
       // timeouts
-      env->CallVoidMethod(conn,env->GetMethodID(cHC,"setConnectTimeout","(I)V"),(jint)30000);
-      env->CallVoidMethod(conn,env->GetMethodID(cHC,"setReadTimeout","(I)V"),(jint)30000);
+      jmethodID mCT = env->GetMethodID(cHC, "setConnectTimeout", "(I)V");
+      jmethodID mRT = env->GetMethodID(cHC, "setReadTimeout",    "(I)V");
+      if (mCT) { env->CallVoidMethod(conn, mCT, (jint)30000); if (env->ExceptionCheck()) env->ExceptionClear(); }
+      else env->ExceptionClear();
+      if (mRT) { env->CallVoidMethod(conn, mRT, (jint)30000); if (env->ExceptionCheck()) env->ExceptionClear(); }
+      else env->ExceptionClear();
 
       // ── write body ──
-      jobject os = env->CallObjectMethod(conn,
-          env->GetMethodID(cHC,"getOutputStream","()Ljava/io/OutputStream;"));
-      if (!os||env->ExceptionCheck()) { env->ExceptionClear(); return ""; }
+      jmethodID mGetOS = env->GetMethodID(cHC, "getOutputStream", "()Ljava/io/OutputStream;");
+      if (!mGetOS) { env->ExceptionClear(); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
+      jobject os = env->CallObjectMethod(conn, mGetOS);
+      if (!os || env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
+
       jclass cOS = env->FindClass("java/io/OutputStream");
-      jbyteArray ba = env->NewByteArray((jsize)body.size());
-      env->SetByteArrayRegion(ba,0,(jsize)body.size(),(const jbyte*)body.data());
-      env->CallVoidMethod(os,env->GetMethodID(cOS,"write","([B)V"),ba);
-      env->CallVoidMethod(os,env->GetMethodID(cOS,"flush","()V"));
-      env->CallVoidMethod(os,env->GetMethodID(cOS,"close","()V"));
-      env->DeleteLocalRef(ba); env->DeleteLocalRef(os);
+      if (cOS) {
+          jbyteArray ba = env->NewByteArray((jsize)body.size());
+          if (ba) {
+              env->SetByteArrayRegion(ba, 0, (jsize)body.size(), (const jbyte*)body.data());
+              jmethodID mWrite = env->GetMethodID(cOS, "write", "([B)V");
+              jmethodID mFlush = env->GetMethodID(cOS, "flush", "()V");
+              jmethodID mClose = env->GetMethodID(cOS, "close", "()V");
+              if (mWrite) { env->CallVoidMethod(os, mWrite, ba); if (env->ExceptionCheck()) env->ExceptionClear(); }
+              else env->ExceptionClear();
+              if (mFlush) { env->CallVoidMethod(os, mFlush);     if (env->ExceptionCheck()) env->ExceptionClear(); }
+              else env->ExceptionClear();
+              if (mClose) { env->CallVoidMethod(os, mClose);     if (env->ExceptionCheck()) env->ExceptionClear(); }
+              else env->ExceptionClear();
+              env->DeleteLocalRef(ba);
+          }
+          env->DeleteLocalRef(cOS);
+      } else { env->ExceptionClear(); }
+      env->DeleteLocalRef(os);
 
       // ── read response ──
-      if (env->ExceptionCheck()) { env->ExceptionClear(); return ""; }
-      jobject is = env->CallObjectMethod(conn,
-          env->GetMethodID(cHC,"getInputStream","()Ljava/io/InputStream;"));
-      if (!is||env->ExceptionCheck()) { env->ExceptionClear(); return ""; }
+      if (env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
+
+      jmethodID mGetIS = env->GetMethodID(cHC, "getInputStream", "()Ljava/io/InputStream;");
+      if (!mGetIS) { env->ExceptionClear(); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
+      jobject is = env->CallObjectMethod(conn, mGetIS);
+      if (!is || env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
 
       jclass cISR = env->FindClass("java/io/InputStreamReader");
-      jobject isr = env->NewObject(cISR,
-          env->GetMethodID(cISR,"<init>","(Ljava/io/InputStream;)V"), is);
+      if (!cISR) { env->ExceptionClear(); env->DeleteLocalRef(is); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
+      jmethodID mISRInit = env->GetMethodID(cISR, "<init>", "(Ljava/io/InputStream;)V");
+      if (!mISRInit) { env->ExceptionClear(); env->DeleteLocalRef(cISR); env->DeleteLocalRef(is); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
+      jobject isr = env->NewObject(cISR, mISRInit, is);
+      env->DeleteLocalRef(cISR);
+      if (!isr || env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(is); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
+
       jclass cBR = env->FindClass("java/io/BufferedReader");
-      jobject br = env->NewObject(cBR,
-          env->GetMethodID(cBR,"<init>","(Ljava/io/Reader;)V"), isr);
-      jmethodID mRL = env->GetMethodID(cBR,"readLine","()Ljava/lang/String;");
+      if (!cBR) { env->ExceptionClear(); env->DeleteLocalRef(isr); env->DeleteLocalRef(is); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
+      jmethodID mBRInit = env->GetMethodID(cBR, "<init>", "(Ljava/io/Reader;)V");
+      if (!mBRInit) { env->ExceptionClear(); env->DeleteLocalRef(cBR); env->DeleteLocalRef(isr); env->DeleteLocalRef(is); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
+      jobject br = env->NewObject(cBR, mBRInit, isr);
+      env->DeleteLocalRef(isr);
+      if (!br || env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(cBR); env->DeleteLocalRef(is); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
+      jmethodID mRL = env->GetMethodID(cBR, "readLine", "()Ljava/lang/String;");
+      env->DeleteLocalRef(cBR);
+      if (!mRL) { env->ExceptionClear(); env->DeleteLocalRef(br); env->DeleteLocalRef(is); env->DeleteLocalRef(cHC); env->DeleteLocalRef(conn); return ""; }
 
       std::string resp;
       while (true) {
@@ -224,8 +315,13 @@
           resp += ch; env->ReleaseStringUTFChars(line,ch);
           env->DeleteLocalRef(line);
       }
-      env->DeleteLocalRef(br); env->DeleteLocalRef(isr); env->DeleteLocalRef(is);
-      env->CallVoidMethod(conn,env->GetMethodID(cHC,"disconnect","()V"));
+      env->DeleteLocalRef(br);
+      // isr already released after br construction; do not double-free
+      env->DeleteLocalRef(is);
+      jmethodID mDisc = env->GetMethodID(cHC, "disconnect", "()V");
+      if (mDisc) { env->CallVoidMethod(conn, mDisc); if (env->ExceptionCheck()) env->ExceptionClear(); }
+      else env->ExceptionClear();
+      env->DeleteLocalRef(cHC);
       env->DeleteLocalRef(conn);
       return resp;
   }
