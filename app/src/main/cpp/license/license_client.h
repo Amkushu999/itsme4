@@ -38,7 +38,7 @@
 //
 #ifndef FACEGATE_HMAC_SECRET
 #define FACEGATE_HMAC_SECRET \
-    "CHANGE_THIS_TO_64_RANDOM_CHARS_SAME_AS_SERVER_ENV_VAR_xxxxxxxxxxxxxxxxxxxxxxxx"
+    "a7f3c9e1b8d4025f6a4b9c0e7d1f8a3b5c2e6d9f0a1b4c7d8e2f5a9b3c6d0e7f"
 #endif
 
 #define FACEGATE_TRIAL_KEY  "NOWORNEVER"
