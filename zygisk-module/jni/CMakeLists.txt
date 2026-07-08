@@ -10,6 +10,7 @@ cmake_minimum_required(VERSION 3.22.1)
   set(HOOK_SOURCES
       main.cpp hook_proxy.cpp symbol_resolver.cpp stream_map.cpp
       frame_source.cpp frame_inject.cpp crash_guard.cpp ipc_socket.cpp
+      license/license_client.cpp
   )
 
   add_library(hookProxy SHARED ${HOOK_SOURCES})
@@ -17,6 +18,7 @@ cmake_minimum_required(VERSION 3.22.1)
   target_include_directories(hookProxy PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/include
       ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/license
   )
 
   find_library(LOG_LIB log)
