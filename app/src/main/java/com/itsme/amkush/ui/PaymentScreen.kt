@@ -123,7 +123,12 @@ private fun PaymentContent(
     }
     
     fun openBot() {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/facegateofficialbot")))
+        try {
+            val url = LicenseGuard.nativeGetTgBot()
+            if (url.isNotEmpty()) {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            }
+        } catch (_: Throwable) {}
     }
     
     fun activate() {
@@ -397,15 +402,10 @@ private fun PaymentContent(
                                 Text("Trial key:", color = TextMuted, fontSize = 11.sp)
                                 Text(
                                     "NOWORNEVER",
-                                    color = GreenSuccess,
+                                    color = Color(0xFF15803D),
                                     fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    style = androidx.compose.ui.text.TextStyle(
-                                        drawStyle = androidx.compose.ui.graphics.drawscope.Stroke(
-                                            width = 0.5f
-                                        )
-                                    )
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
@@ -422,18 +422,12 @@ private fun PaymentContent(
                         .padding(vertical = 14.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        BotIcon()
-                        Text(
-                            "Open Telegram Bot",
-                            color = CyanAccent,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+                    Text(
+                        "Open Telegram Bot",
+                        color = CyanAccent,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
                 
                 Box(

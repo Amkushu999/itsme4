@@ -12,13 +12,16 @@ package com.itsme.amkush.network
 
   object ApiClient {
       // Server URL is XOR-obfuscated in native; never stored as plaintext in Kotlin.
+      // If the native library is unavailable the URL resolves to "" which will
+      // cause Retrofit construction to throw — intentional, since the whole
+      // license/network stack is unusable without the native module.
       private val BASE_URL: String by lazy {
           try {
               val url = LicenseGuard.nativeGetBaseUrl()
               if (url.isNotEmpty()) url.trimEnd('/') + "/"
-              else "https://standing-panther-214.convex.site/"
-          } catch (_: Throwable) {
-              "https://standing-panther-214.convex.site/"
+              else error("nativeGetBaseUrl returned empty — native library not loaded")
+          } catch (t: Throwable) {
+              error("BASE_URL unavailable: ${t.message}")
           }
       }
 
