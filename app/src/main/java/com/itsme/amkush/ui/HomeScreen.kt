@@ -1580,7 +1580,7 @@ fun AdminCreditsScreen(onBack: () -> Unit) {
                         Brush.linearGradient(listOf(Color(0xF80F0A1E), Color(0xF20A081A)))
                     )
                     .border(1.dp, Color(0x40A050FF), RoundedCornerShape(20.dp))
-                    .padding(16.dp)
+                    .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 22.dp)
             ) {
                 // Header
                 Row(
@@ -1689,7 +1689,7 @@ fun AdminCreditsScreen(onBack: () -> Unit) {
                         Brush.linearGradient(listOf(Color(0xF8051915), Color(0xF2051410)))
                     )
                     .border(1.dp, Color(0x4000C864), RoundedCornerShape(20.dp))
-                    .padding(16.dp)
+                    .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 22.dp)
             ) {
                 // Header
                 Row(
