@@ -125,10 +125,14 @@ private fun PaymentContent(
     fun openBot() {
         try {
             val url = LicenseGuard.nativeGetTgBot()
-            if (url.isNotEmpty()) {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            if (url.isEmpty()) {
+                Toast.makeText(context, "Could not resolve bot link", Toast.LENGTH_SHORT).show()
+                return
             }
-        } catch (_: Throwable) {}
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            Toast.makeText(context, "Could not open Telegram", Toast.LENGTH_SHORT).show()
+        }
     }
     
     fun activate() {
