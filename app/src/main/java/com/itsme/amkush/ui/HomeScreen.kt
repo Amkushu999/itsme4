@@ -19,6 +19,12 @@ import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.*
@@ -27,6 +33,7 @@ import androidx.compose.ui.draw.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.*
 import androidx.compose.ui.text.style.TextAlign
@@ -48,7 +55,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.Inet4Address
 import java.net.NetworkInterface
-// ─── Colors ──────────────────────────────────────────────────────────────────
+// ─── Colors ───────────────────────────────────────────────────────────────────
 private val BgDark   = Color(0xFF0D0D18)
 private val Surface  = Color(0x12FFFFFF)
 private val Border   = Color(0x1AFFFFFF)
@@ -60,6 +67,9 @@ private val OrangeWait = Color(0xFFFF6B35)
 private val TextSec  = Color(0x44FFFFFF)
 private val TextMid  = Color(0x88FFFFFF)
 private val RedHook  = Color(0xFFFF1744)
+private val InactiveGray = Color(0xFF8892A4)
+private val TextTertiary = Color(0xFF5A6474)
+
 class HomeScreen : ComponentActivity() {
 @SuppressLint("QueryPermissionsNeeded")
  override fun onCreate(savedInstanceState: Bundle?) {
@@ -216,7 +226,7 @@ class HomeScreen : ComponentActivity() {
      }
  }
 }
-// ─── IP helper ───────────────────────────────────────────────────────────────
+// ─── IP helper ────────────────────────────────────────────────────────────────
 private fun getCurrentIpAddress(context: Context): String {
 // Try WiFi first
 try {
@@ -243,7 +253,7 @@ return addr.hostAddress ?: continue
 } catch (: Exception) {}
 return "Unavailable"
 }
-// ─── Main HomeScreen ──────────────────────────────────────────────────────────
+// ── Main HomeScreen ──────────────────────────────────────────────────────────
 @SuppressLint("QueryPermissionsNeeded")
 @Composable
 private fun HomeScreenContent(
@@ -644,89 +654,99 @@ var appList      by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
                      val app = selectedApp!!
                      Row(
                          verticalAlignment = Alignment.CenterVertically,
-                         horizontalArrangement = Arrangement.spacedBy(14.dp)
+                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                      ) {
-                         AppIconCircle(app = app, size = 50.dp)
+                         // App Icon with border
+                         val icon = app.icon
+                         if (icon != null) {
+                             val bitmap = remember(app.packageName) { drawableToBitmap(icon) }
+                             if (bitmap != null) {
+                                 Image(
+                                     bitmap = bitmap.asImageBitmap(),
+                                     contentDescription = app.appName,
+                                     modifier = Modifier
+                                         .size(50.dp)
+                                         .clip(RoundedCornerShape(12.dp))
+                                         .border(1.dp, Pink.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                                 )
+                             } else {
+                                 AppIconCircle(app = app, size = 50.dp, cornerRadius = 12.dp)
+                             }
+                         } else {
+                             AppIconCircle(app = app, size = 50.dp, cornerRadius = 12.dp)
+                         }
+                         
                          Column(Modifier.weight(1f)) {
                              Text(
                                  "TARGET LOCKED",
-                                 color = Cyan.copy(alpha = 0.8f),
-                                 fontSize = 9.sp,
+                                 color = Pink,
+                                 fontSize = 10.sp,
                                  fontWeight = FontWeight.Bold,
-                                 letterSpacing = 1.5.sp
+                                 letterSpacing = 0.5.sp
                              )
-                             Spacer(Modifier.height(2.dp))
+                             Spacer(Modifier.height(4.dp))
                              Text(
                                  app.appName,
                                  color = Color.White,
                                  fontWeight = FontWeight.Bold,
-                                 fontSize = 15.sp,
+                                 fontSize = 17.sp,
                                  maxLines = 1,
                                  overflow = TextOverflow.Ellipsis
                              )
                          }
+                         
                          Box(
                              modifier = Modifier
-                                 .size(32.dp)
-                                 .background(Color(0x33FF4D9D), CircleShape)
-                                 .border(1.dp, Pink.copy(alpha = 0.4f), CircleShape)
+                                 .size(36.dp)
+                                 .background(Pink.copy(alpha = 0.15f), CircleShape)
                                  .clickable { selectedApp = null; SharedPrefs.clearTarget() },
                              contentAlignment = Alignment.Center
                          ) {
-                             Text("✕", color = Pink, fontSize = 14.sp)
+                             Icon(
+                                 imageVector = Icons.Filled.Close,
+                                 contentDescription = "Clear",
+                                 tint = Pink,
+                                 modifier = Modifier.size(20.dp)
+                             )
                          }
                      }
                  } else {
                      Row(
                          verticalAlignment = Alignment.CenterVertically,
-                         horizontalArrangement = Arrangement.spacedBy(14.dp)
+                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                      ) {
-                         Box(
-                             modifier = Modifier
-                                 .size(50.dp)
-                                 .background(Color(0x1AFFFFFF), RoundedCornerShape(14.dp))
-                                 .border(1.dp, Border, RoundedCornerShape(14.dp)),
-                             contentAlignment = Alignment.Center
-                         ) {
-                             Canvas(modifier = Modifier.size(26.dp)) {
-                                 val cx = size.width / 2f
-                                 val cy = size.height / 2f
-                                 // Camera body
-                                 drawRoundRect(
-                                     color = Color(0x99FFFFFF),
-                                     topLeft = Offset(size.width * 0.08f, size.height * 0.28f),
-                                     size = androidx.compose.ui.geometry.Size(size.width * 0.84f, size.height * 0.52f),
-                                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width * 0.12f)
-                                 )
-                                 // Lens
-                                 drawCircle(color = Color(0x99FFFFFF), radius = size.width * 0.18f, center = Offset(cx, cy + size.height * 0.04f))
-                                 // Bump
-                                 drawRoundRect(
-                                     color = Color(0x99FFFFFF),
-                                     topLeft = Offset(size.width * 0.3f, size.height * 0.14f),
-                                     size = androidx.compose.ui.geometry.Size(size.width * 0.22f, size.height * 0.18f),
-                                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width * 0.06f)
-                                 )
-                             }
-                         }
+                         Icon(
+                             imageVector = Icons.Filled.CameraAlt,
+                             contentDescription = "Camera",
+                             tint = InactiveGray,
+                             modifier = Modifier.size(50.dp)
+                         )
+                         
                          Column(Modifier.weight(1f)) {
                              Text(
                                  "SELECT TARGET",
-                                 color = Color.White,
+                                 color = InactiveGray,
                                  fontWeight = FontWeight.Bold,
-                                 fontSize = 14.sp
+                                 fontSize = 15.sp
                              )
+                             Spacer(Modifier.height(4.dp))
                              Text(
                                  "Choose app to hook camera",
-                                 color = TextMid,
-                                 fontSize = 11.sp
+                                 color = TextTertiary,
+                                 fontSize = 12.sp
                              )
                          }
-                         Text("›", color = TextMid, fontSize = 22.sp)
+                         
+                         Icon(
+                             imageVector = Icons.Filled.ChevronRight,
+                             contentDescription = "Arrow",
+                             tint = TextTertiary,
+                             modifier = Modifier.size(28.dp)
+                         )
                      }
                  }
              }
-             // ─ App List ─────────────────────────────────────────────────
+             // ── App List ─────────────────────────────────────────────────
              AnimatedVisibility(
                  visible = showAppList,
                  enter = expandVertically() + fadeIn(),
@@ -878,7 +898,7 @@ var appList      by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
              Spacer(Modifier.height(80.dp))
          }
      }
-     // ─ Bottom Hook / Select Button ───────────────────────────────────────
+     // ── Bottom Hook / Select Button ───────────────────────────────────────
      Box(
          modifier = Modifier
              .align(Alignment.BottomCenter)
@@ -889,18 +909,13 @@ var appList      by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
          Box(
              modifier = Modifier
                  .fillMaxWidth()
-                 .height(60.dp)
+                 .height(64.dp)
                  .clip(RoundedCornerShape(20.dp))
                  .background(
                      if (hasApp)
-                         Brush.linearGradient(listOf(RedHook, Color(0xFFFF4D9D)))
+                         Brush.linearGradient(listOf(RedHook, Pink))
                      else
-                         Brush.linearGradient(listOf(Color(0xFF1A1A2E), Color(0xFF1A1A2E)))
-                 )
-                 .border(
-                     1.dp,
-                     if (hasApp) Color.Transparent else Border,
-                     RoundedCornerShape(20.dp)
+                         Color(0xFF1E2330)
                  )
                  .clickable(enabled = !locking) {
                      if (hasApp) handleHookCamera() else showAppList = !showAppList
@@ -909,33 +924,20 @@ var appList      by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
          ) {
              if (locking) {
                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                     CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                     CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                      Text("Locking...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                  }
              } else if (hasApp) {
                  Row(
                      verticalAlignment = Alignment.CenterVertically,
-                     horizontalArrangement = Arrangement.spacedBy(10.dp)
+                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                  ) {
-                     // Camera icon
-                     Canvas(modifier = Modifier.size(22.dp)) {
-                         drawRoundRect(
-                             color = Color.White,
-                             topLeft = Offset(size.width * 0.06f, size.height * 0.28f),
-                             size = androidx.compose.ui.geometry.Size(size.width * 0.78f, size.height * 0.52f),
-                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width * 0.12f)
-                         )
-                         drawCircle(color = Color(0xFFFF1744), radius = size.width * 0.17f,
-                             center = Offset(size.width * 0.44f, size.height * 0.54f))
-                         // Lens triangle (viewfinder)
-                         val path = Path().apply {
-                             moveTo(size.width * 0.86f, size.height * 0.35f)
-                             lineTo(size.width * 0.86f, size.height * 0.65f)
-                             lineTo(size.width * 1.0f, size.height * 0.5f)
-                             close()
-                         }
-                         drawPath(path, Color.White)
-                     }
+                     Icon(
+                         imageVector = Icons.Filled.Videocam,
+                         contentDescription = "Camera",
+                         tint = Color.White,
+                         modifier = Modifier.size(24.dp)
+                     )
                      Column(horizontalAlignment = Alignment.CenterHorizontally) {
                          Text(
                              "HOOK CAMERA",
@@ -946,22 +948,27 @@ var appList      by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
                          )
                          Text(
                              "Tap to inject camera hook",
-                             color = Color.White.copy(alpha = 0.7f),
-                             fontSize = 9.sp
+                             color = Color.White.copy(alpha = 0.8f),
+                             fontSize = 10.sp
                          )
                      }
                  }
              } else {
                  Row(
                      verticalAlignment = Alignment.CenterVertically,
-                     horizontalArrangement = Arrangement.spacedBy(10.dp)
+                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                  ) {
-                     Text("🔒", fontSize = 18.sp)
+                     Icon(
+                         imageVector = Icons.Filled.Lock,
+                         contentDescription = "Lock",
+                         tint = Color.White,
+                         modifier = Modifier.size(24.dp)
+                     )
                      Text(
                          "SELECT TARGET",
                          color = Color.White,
                          fontWeight = FontWeight.Black,
-                         fontSize = 15.sp,
+                         fontSize = 16.sp,
                          letterSpacing = 1.sp
                      )
                  }
@@ -985,7 +992,7 @@ val exitCode = finished ?: run { process.destroy(); -1 }
 exitCode == 0
 } catch (_: Exception) { false }
 }
-// ─── Admin Credits Screen ─────────────────────────────────────────────────────
+// ── Admin Credits Screen ─────────────────────────────────────────────────────
 private val Red        = Color(0xFFEF4444)
 private val OrangeText = Color(0xFFFB923C)
 private val SlateText  = Color(0xFFCBD5E1)
@@ -1060,34 +1067,20 @@ cornerRadius = androidx.compose.ui.geometry.CornerRadius(0.5f sx, 0.5f sy)
 // Small check-circle bullet used in feature lists
 @Composable
 private fun CheckBullet(color: Color) {
-    Canvas(Modifier.size(14.dp)) {
-        val r = size.minDimension / 2f
-        // Background circle
-        drawCircle(color.copy(alpha = 0.15f), radius = r)
-        // Border circle
-        drawCircle(color.copy(alpha = 0.40f), radius = r,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()))
-        
-        // Scale factor: map 14x14 viewBox to canvas size
-        val sc = size.minDimension / 14f
-        
-        // Draw checkmark path: (4.5, 7) -> (6.5, 9) -> (9.5, 6)
-        // Fixed coordinates: simply multiply by sc
-        drawLine(
-            color,
-            androidx.compose.ui.geometry.Offset(4.5f * sc, 7f * sc),
-            androidx.compose.ui.geometry.Offset(6.5f * sc, 9f * sc),
-            strokeWidth = 1.5f * sc,
-            cap = androidx.compose.ui.graphics.StrokeCap.Round
-        )
-        drawLine(
-            color,
-            androidx.compose.ui.geometry.Offset(6.5f * sc, 9f * sc),
-            androidx.compose.ui.geometry.Offset(9.5f * sc, 6f * sc),
-            strokeWidth = 1.5f * sc,
-            cap = androidx.compose.ui.graphics.StrokeCap.Round
-        )
-    }
+Canvas(Modifier.size(14.dp)) {
+val r = size.minDimension / 2f
+drawCircle(colo r.copy(alpha = 0.15f), radius = r)
+drawCircle(color.copy(alpha = 0.40f), radius = r,
+style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()))
+// ✓ path: 4.5,7 →  6.5,9 → 9.5,6
+val sc = size.minDimension / 14f
+drawLine(color, androidx.compose.ui.geometry.Offset(4.5f sc 14/size.minDimension r 2, 7f sc 14/size.minDimension r 2),
+androidx.compose.ui.geometry.Offset(6.5f sc 14/size.minDimension r 2, 9f sc 14/size.minDimension r 2),
+strokeWidth = 1.4f sc 14, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+drawLine(color, androidx.compose.ui.geometry.Offset(6.5f sc 14/size.minDimension r 2, 9f sc 14/size.minDimension r 2),
+androidx.compose.ui.geometry.Offset(9.5f sc 14/size.minDimension r 2, 6f sc 14/size.minDimension r 2),
+strokeWidth = 1.4f sc 14, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+}
 }
 @Composable
 fun AdminCreditsScreen(onBack: () -> Unit) {
@@ -1176,7 +1169,7 @@ var showTrialModal by remember { mutableStateOf(false) }
              .padding(horizontal = 20.dp)
              .padding(top = 28.dp, bottom = 64.dp)
      ) {
-         // ── Back button ─
+         // ── Back button ──
          Row(
              modifier = Modifier
                  .clickable { onBack() }
@@ -1267,7 +1260,7 @@ var showTrialModal by remember { mutableStateOf(false) }
                  .fillMaxWidth()
                  .padding(bottom = 28.dp)
          )
-         // ─ Warning card ──
+         // ── Warning card ──
          Column(
              modifier = Modifier
                  .fillMaxWidth()
@@ -1655,7 +1648,7 @@ var showTrialModal by remember { mutableStateOf(false) }
              }
          }
          Spacer(Modifier.height(24.dp))
-         // ── App Integrity Card ──
+         // ─ App Integrity Card ──
          val greenAccent = Color(0xFF00C864)
          Column(
              modifier = Modifier
@@ -1732,7 +1725,7 @@ var showTrialModal by remember { mutableStateOf(false) }
              }
          }
          Spacer(Modifier.height(28.dp))
-         // ── Official Links divider ──
+         // ─ Official Links divider ──
          Row(
              verticalAlignment = Alignment.CenterVertically,
              horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1835,7 +1828,7 @@ var showTrialModal by remember { mutableStateOf(false) }
              modifier = Modifier.fillMaxWidth()
          )
      }
-     // ── Trial Key Modal ──────────────────────────────────────────────────────
+     // ── Trial Key Modal ─────────────────────────────────────────────────────
      if (showTrialModal) {
          Box(
              modifier = Modifier
@@ -1957,7 +1950,7 @@ var showTrialModal by remember { mutableStateOf(false) }
      }
  }
 }
-// ── Shared helpers ───────────────────────────────────────────────────────────
+// ─── Shared helpers ───────────────────────────────────────────────────────────
 @Composable
 fun AppIconCircle(app: AppInfo, size: Dp, cornerRadius: Dp = 14.dp) {
 val icon = app.icon
