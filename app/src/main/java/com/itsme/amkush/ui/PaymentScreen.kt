@@ -649,8 +649,14 @@ private fun BotIcon() {
             color = Color(0xFF0F172A),
             topLeft = Offset(9.dp.toPx(), 14.dp.toPx()),
             size = androidx.compose.ui.geometry.Size(30.dp.toPx(), 24.dp.toPx()),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx())
+        )
+        drawRoundRect(
+            color = CyanAccent,
+            topLeft = Offset(9.dp.toPx(), 14.dp.toPx()),
+            size = androidx.compose.ui.geometry.Size(30.dp.toPx(), 24.dp.toPx()),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx()),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.4.dp.toPx(), color = CyanAccent)
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.4.dp.toPx())
         )
         
         val leftEyeScale = if (centerX < size.width / 2f) blink else 1f

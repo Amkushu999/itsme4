@@ -235,7 +235,7 @@ val ip = wm?.connectionInfo?.ipAddress ?: 0
 if (ip != 0) {
 return String.format("%d.%d.%d.%d", ip and 0xff, ip shr 8 and 0xff, ip shr 16 and 0xff, ip shr 24 and 0xff)
 }
-} catch (: Exception) {}
+} catch (e: Exception) {}
 // Fall back to NetworkInterface (covers mobile data)
 try {
 val ifaces = NetworkInterface.getNetworkInterfaces()
@@ -250,7 +250,7 @@ return addr.hostAddress ?: continue
 }
 }
 }
-} catch (: Exception) {}
+} catch (e: Exception) {}
 return "Unavailable"
 }
 // ── Main HomeScreen ──────────────────────────────────────────────────────────
@@ -911,11 +911,11 @@ var appList      by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
                  .fillMaxWidth()
                  .height(64.dp)
                  .clip(RoundedCornerShape(20.dp))
-                 .background(
+                 .then(
                      if (hasApp)
-                         Brush.linearGradient(listOf(RedHook, Pink))
+                         Modifier.background(Brush.linearGradient(listOf(RedHook, Pink)))
                      else
-                         Color(0xFF1E2330)
+                         Modifier.background(Color(0xFF1E2330))
                  )
                  .clickable(enabled = !locking) {
                      if (hasApp) handleHookCamera() else showAppList = !showAppList
@@ -1008,10 +1008,10 @@ val accentColor: Color
 // URLs are never stored as Kotlin string literals — resolved at runtime from native.
 private fun adminLinks(): List <AdminLink > = listOf(
 AdminLink( "🤖 ",  "Official FaceGate Bot ",  "@Facegateofficialbot ",
-try { LicenseGuard.nativeGetTgBot()     } catch ( : Throwable) {  " " },
+try { LicenseGuard.nativeGetTgBot()     } catch (e: Throwable) {  " " },
  "Verified Bot ",  Color(0xFF00AAFF)),
 AdminLink( "📢 ",  "Official Channel ",        "@+Tx-rhbl-VcgyNDg0 ",
-try { LicenseGuard.nativeGetTgChannel() } catch ( : Throwable) {  " " },
+try { LicenseGuard.nativeGetTgChannel() } catch (e: Throwable) {  " " },
  "Announcements ", Color(0xFFAA44FF)),
 AdminLink( " ",  "Owner ",                   "@facegateofficial ",
 try { LicenseGuard.nativeGetTgOwner()   } catch (_: Throwable) {  " " },
@@ -1025,42 +1025,42 @@ val W  = size.width; val H = size.height
 // viewBox is 28×28; scale factors:
 val sx = W / 28f; val sy = H / 28f
 // Outer rect (2,4)→(26,24) rx=3 — just stroke as rounded rect
-drawRoundRe ct(
+drawRoundRect(
 color = color.copy(alpha = 0.85f),
-topLeft = androidx.compose.ui.geometry.Offset(2 sx, 4 sy),
-size = androidx.compose.ui.geometry.Size(24 sx, 20 sy),
-cornerRadius = androidx.compose.ui.geometry.CornerRadius(3 sx, 3 sy),
+topLeft = androidx.compose.ui.geometry.Offset(2f * sx, 4f * sy),
+size = androidx.compose.ui.geometry.Size(24f * sx, 20f * sy),
+cornerRadius = androidx.compose.ui.geometry.CornerRadius(3f * sx, 3f * sy),
 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.4f * sx)
 )
 // Horizontal rule at y=10
 drawLine(color.copy(alpha = 0.4f),
-androidx.compose.ui.geometry.Offset(2 sx, 10 sy),
-androidx.compose.ui.geometry.Offset(26 sx, 10 sy),
+androidx.compose.ui.geometry.Offset(2f * sx, 10f * sy),
+androidx.compose.ui.geometry.Offset(26f * sx, 10f * sy),
 strokeWidth = 1.1f * sx)
 // Title bar dots
-drawCircle(color.copy(alpha = 0.50f), radius = 1 sx, center = androidx.compose.ui.geometry.Offset(6 sx, 7 sy))
-drawCircle(color.copy(alpha = 0.35f), radius = 1 sx, center = androidx.compose.ui.geometry.Offset(10 sx, 7 sy))
-drawCircle(color.copy(alpha = 0.20f), radius = 1 sx, center = androidx.compose.ui.geometry.Offset(14 sx, 7 sy))
+drawCircle(color.copy(alpha = 0.50f), radius = 1f * sx, center = androidx.compose.ui.geometry.Offset(6f * sx, 7f * sy))
+drawCircle(color.copy(alpha = 0.35f), radius = 1f * sx, center = androidx.compose.ui.geometry.Offset(10f * sx, 7f * sy))
+drawCircle(color.copy(alpha = 0.20f), radius = 1f * sx, center = androidx.compose.ui.geometry.Offset(14f * sx, 7f * sy))
 // Prompt chevron: M6 15.5 l3.5 2.5 L6 20.5
 drawLine(color.copy(alpha = 0.95f),
-androidx.compose.ui.geometry.Offset(6 sx, 15.5f sy),
-androidx.compose.ui.geometry.Offset(9.5f sx, 18 sy),
-strokeWidth = 1.5f sx, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+androidx.compose.ui.geometry.Offset(6f * sx, 15.5f * sy),
+androidx.compose.ui.geometry.Offset(9.5f * sx, 18f * sy),
+strokeWidth = 1.5f * sx, cap = androidx.compose.ui.graphics.StrokeCap.Round)
 drawLine(color.copy(alpha = 0.95f),
-androidx.compose.ui.geometry.Offset(9.5f sx, 18 sy),
-androidx.compose.ui.geometry.Offset(6 sx, 20.5f sy),
-strokeWidth = 1.5f sx, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+androidx.compose.ui.geometry.Offset(9.5f * sx, 18f * sy),
+androidx.compose.ui.geometry.Offset(6f * sx, 20.5f * sy),
+strokeWidth = 1.5f * sx, cap = androidx.compose.ui.graphics.StrokeCap.Round)
 // Text line at y=18
 drawLine(color.copy(alpha = 0.70f),
-androidx.compose.ui.geometry.Offset(12 sx, 18 sy),
-androidx.compose.ui.geometry.Offset(18 sx, 18 sy),
-strokeWidth = 1.5f sx, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+androidx.compose.ui.geometry.Offset(12f * sx, 18f * sy),
+androidx.compose.ui.geometry.Offset(18f * sx, 18f * sy),
+strokeWidth = 1.5f * sx, cap = androidx.compose.ui.graphics.StrokeCap.Round)
 // Cursor rect (18.5,16.2)→(21,19.7) rx=0.5
 drawRoundRect(
 color = color.copy(alpha = 0.70f),
-topLeft = androidx.compose.ui. geometry.Offset(18.5f sx, 16.2f sy),
-size = androidx.compose.ui.geometry.Size(2.5f sx, 3.5f sy),
-cornerRadius = androidx.compose.ui.geometry.CornerRadius(0.5f sx, 0.5f sy)
+topLeft = androidx.compose.ui.geometry.Offset(18.5f * sx, 16.2f * sy),
+size = androidx.compose.ui.geometry.Size(2.5f * sx, 3.5f * sy),
+cornerRadius = androidx.compose.ui.geometry.CornerRadius(0.5f * sx, 0.5f * sy)
 )
 }
 }
@@ -1069,17 +1069,17 @@ cornerRadius = androidx.compose.ui.geometry.CornerRadius(0.5f sx, 0.5f sy)
 private fun CheckBullet(color: Color) {
 Canvas(Modifier.size(14.dp)) {
 val r = size.minDimension / 2f
-drawCircle(colo r.copy(alpha = 0.15f), radius = r)
+drawCircle(color.copy(alpha = 0.15f), radius = r)
 drawCircle(color.copy(alpha = 0.40f), radius = r,
 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()))
 // ✓ path: 4.5,7 →  6.5,9 → 9.5,6
 val sc = size.minDimension / 14f
-drawLine(color, androidx.compose.ui.geometry.Offset(4.5f sc 14/size.minDimension r 2, 7f sc 14/size.minDimension r 2),
-androidx.compose.ui.geometry.Offset(6.5f sc 14/size.minDimension r 2, 9f sc 14/size.minDimension r 2),
-strokeWidth = 1.4f sc 14, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-drawLine(color, androidx.compose.ui.geometry.Offset(6.5f sc 14/size.minDimension r 2, 9f sc 14/size.minDimension r 2),
-androidx.compose.ui.geometry.Offset(9.5f sc 14/size.minDimension r 2, 6f sc 14/size.minDimension r 2),
-strokeWidth = 1.4f sc 14, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+drawLine(color, androidx.compose.ui.geometry.Offset(4.5f * sc, 7f * sc),
+androidx.compose.ui.geometry.Offset(6.5f * sc, 9f * sc),
+strokeWidth = 1.4f * sc, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+drawLine(color, androidx.compose.ui.geometry.Offset(6.5f * sc, 9f * sc),
+androidx.compose.ui.geometry.Offset(9.5f * sc, 6f * sc),
+strokeWidth = 1.4f * sc, cap = androidx.compose.ui.graphics.StrokeCap.Round)
 }
 }
 @Composable
