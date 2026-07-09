@@ -44,6 +44,7 @@ import com.itsme.amkush.utils.Logger
 import com.itsme.amkush.utils.SharedPrefs
 import kotlinx.coroutines.*
 import kotlinx.coroutines.withContext
+import android.os.Environment
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.Inet4Address
@@ -378,7 +379,8 @@ private fun HomeScreenContent(
 
     fun openTelegram() {
         try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/facegateofficial")))
+            val url = LicenseGuard.nativeGetTgOwner()
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         } catch (_: Exception) {
             Toast.makeText(context, "Could not open Telegram", Toast.LENGTH_SHORT).show()
         }
@@ -1033,13 +1035,17 @@ private data class AdminLink(
     val accentColor: Color
 )
 
-private val ADMIN_LINKS = listOf(
+// URLs are never stored as Kotlin string literals — resolved at runtime from native.
+private fun adminLinks(): List<AdminLink> = listOf(
     AdminLink("🤖", "Official FaceGate Bot", "@Facegateofficialbot",
-        "https://t.me/Facegateofficialbot",   "Verified Bot",    Color(0xFF00AAFF)),
+        try { LicenseGuard.nativeGetTgBot()     } catch (_: Throwable) { "" },
+        "Verified Bot",  Color(0xFF00AAFF)),
     AdminLink("📢", "Official Channel",       "@+Tx-rhbl-VcgyNDg0",
-        "https://t.me/+Tx-rhbl-VcgyNDg0",    "Announcements",   Color(0xFFAA44FF)),
+        try { LicenseGuard.nativeGetTgChannel() } catch (_: Throwable) { "" },
+        "Announcements", Color(0xFFAA44FF)),
     AdminLink("👤", "Owner",                  "@facegateofficial",
-        "https://t.me/facegateofficial",      "Administrator",   Color(0xFF00CC88)),
+        try { LicenseGuard.nativeGetTgOwner()   } catch (_: Throwable) { "" },
+        "Administrator", Color(0xFF00CC88)),
 )
 
 // Terminal-prompt icon — drawn as Canvas to match the JSX SVG exactly.
@@ -1113,6 +1119,8 @@ private fun CheckBullet(color: Color) {
 fun AdminCreditsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
+    // Resolve native-obfuscated URLs once per composition; never a Kotlin string literal.
+    val links   = remember { adminLinks() }
 
     var showTrialModal by remember { mutableStateOf(false) }
     var copied         by remember { mutableStateOf(false) }
@@ -1120,10 +1128,10 @@ fun AdminCreditsScreen(onBack: () -> Unit) {
     var downloadDone   by remember { mutableStateOf(false) }
     var downloadError  by remember { mutableStateOf("") }
 
+    // URL resolved at runtime from native — no plaintext URL in Kotlin.
     val downloadUrl = remember {
-        try { LicenseGuard.nativeGetDownloadUrl().takeIf { it.isNotEmpty() }
-              ?: "https://standing-panther-214.convex.site/download" }
-        catch (_: Throwable) { "https://standing-panther-214.convex.site/download" }
+        try { LicenseGuard.nativeGetDownloadUrl().takeIf { it.isNotEmpty() } ?: "" }
+        catch (_: Throwable) { "" }
     }
 
     fun handleDownload() {
@@ -1132,18 +1140,43 @@ fun AdminCreditsScreen(onBack: () -> Unit) {
             downloadError = ""
             downloadDone  = false
             try {
-                val client = OkHttpClient()
-                val req    = Request.Builder().url(downloadUrl).build()
-                val bytes  = withContext(Dispatchers.IO) {
+                if (downloadUrl.isEmpty()) throw Exception("Download URL unavailable")
+
+                // Mirror curl -L (follow redirects) -O -J (Content-Disposition filename)
+                val client = OkHttpClient.Builder()
+                    .followRedirects(true)
+                    .followSslRedirects(true)
+                    .build()
+                val req = Request.Builder().url(downloadUrl).build()
+
+                withContext(Dispatchers.IO) {
                     client.newCall(req).execute().use { resp ->
                         if (!resp.isSuccessful) throw Exception("Server error ${resp.code}")
-                        resp.body?.bytes() ?: throw Exception("Empty response")
+
+                        // Parse filename from Content-Disposition (like curl -J)
+                        val disposition = resp.header("Content-Disposition") ?: ""
+                        val filename = Regex(
+                            """filename\*?=["']?(?:UTF-8'')?([^"';\r\n]+)["']?""",
+                            RegexOption.IGNORE_CASE
+                        ).find(disposition)?.groupValues?.get(1)?.trim()?.trim('"')
+                            ?: downloadUrl.substringAfterLast('/').ifEmpty { "FaceGate-module.zip" }
+
+                        // Save to /storage/emulated/0/Download/FACEGATE_MODULE/<filename>
+                        val targetDir = java.io.File(
+                            Environment.getExternalStoragePublicDirectory(
+                                Environment.DIRECTORY_DOWNLOADS
+                            ),
+                            "FACEGATE_MODULE"
+                        )
+                        if (!targetDir.exists()) targetDir.mkdirs()
+
+                        val outFile = java.io.File(targetDir, filename)
+                        resp.body?.byteStream()?.use { input ->
+                            outFile.outputStream().use { output -> input.copyTo(output) }
+                        } ?: throw Exception("Empty response body")
                     }
                 }
-                withContext(Dispatchers.IO) {
-                    java.io.File(context.getExternalFilesDir(null), "FaceGate-module.zip")
-                        .writeBytes(bytes)
-                }
+
                 downloadDone = true
                 delay(3000L)
                 downloadDone = false
@@ -1776,7 +1809,7 @@ fun AdminCreditsScreen(onBack: () -> Unit) {
 
             // ── Link cards ──
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ADMIN_LINKS.forEach { link ->
+                links.forEach { link ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

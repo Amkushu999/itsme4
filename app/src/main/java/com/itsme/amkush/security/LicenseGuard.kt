@@ -19,9 +19,12 @@ package com.itsme.amkush.security
       external fun nativeClearActivation(context: Context)
       external fun nativeSecurityCheck(): Boolean
 
-      // ── URL helpers (server URL is XOR-obfuscated in native) ─────────────────
+      // ── URL helpers (all URLs XOR-obfuscated in native; never plaintext) ───────
       external fun nativeGetBaseUrl(): String
       external fun nativeGetDownloadUrl(): String
+      external fun nativeGetTgBot(): String
+      external fun nativeGetTgChannel(): String
+      external fun nativeGetTgOwner(): String
 
       // ── Typed result wrappers ─────────────────────────────────────────────────
       data class ActivationResult(

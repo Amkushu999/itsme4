@@ -411,8 +411,8 @@
       return tampered()?JNI_FALSE:JNI_TRUE;
   }
 
-  // ── URL helpers: return XOR-decoded server addresses so Kotlin never contains ──
-  // ── plaintext URL strings. Callers: LicenseGuard.nativeGetBaseUrl() etc.      ──
+  // ── URL helpers: all URLs XOR-obfuscated; Kotlin never sees plaintext strings ──
+  // ── Key 0x5A throughout. Decode: byte ^ 0x5A.                                ──
 
   JNIEXPORT jstring JNICALL
   Java_com_itsme_amkush_security_LicenseGuard_nativeGetBaseUrl(
@@ -421,17 +421,71 @@
       return env->NewStringUTF(url.c_str());
   }
 
-  // Decoded: /download  (XOR key 0x5A)
-  static const uint8_t EP_DOWNLOAD[] = {
-      0x75,0x3E,0x35,0x2D,0x34,0x36,0x35,0x3B,0x3E
+  // Decoded: https://grateful-mule-939.convex.site/download  (XOR key 0x5A)
+  static const uint8_t DOWNLOAD_URL_OBF[] = {
+      0x32,0x2E,0x2E,0x2A,0x29,0x60,0x75,0x75,  // https://
+      0x3D,0x28,0x3B,0x2E,0x3F,0x3C,0x2F,0x36,  // grateful
+      0x77,                                        // -
+      0x37,0x2F,0x36,0x3F,                        // mule
+      0x77,                                        // -
+      0x63,0x69,0x63,                              // 939
+      0x74,                                        // .
+      0x39,0x35,0x34,0x2C,0x3F,0x22,0x74,        // convex.
+      0x29,0x33,0x2E,0x3F,                        // site
+      0x75,                                        // /
+      0x3E,0x35,0x2D,0x34,0x36,0x35,0x3B,0x3E   // download
   };
 
   JNIEXPORT jstring JNICALL
   Java_com_itsme_amkush_security_LicenseGuard_nativeGetDownloadUrl(
       JNIEnv *env, jobject) {
-      std::string url = xor_decode(BASE_URL_OBF, sizeof(BASE_URL_OBF))
-                      + xor_decode(EP_DOWNLOAD, sizeof(EP_DOWNLOAD));
+      std::string url = xor_decode(DOWNLOAD_URL_OBF, sizeof(DOWNLOAD_URL_OBF));
       return env->NewStringUTF(url.c_str());
+  }
+
+  // ── Telegram URLs (XOR key 0x5A) ─────────────────────────────────────────────
+
+  // Decoded: https://t.me/Facegateofficialbot
+  static const uint8_t TG_BOT_OBF[] = {
+      0x32,0x2E,0x2E,0x2A,0x29,0x60,0x75,0x75,  // https://
+      0x2E,0x74,0x37,0x3F,0x75,                  // t.me/
+      0x1C,0x3B,0x39,0x3F,0x3D,0x3B,0x2E,0x3F,  // Facegate
+      0x35,0x3C,0x3C,0x33,0x39,0x33,0x3B,0x36,  // official
+      0x38,0x35,0x2E                              // bot
+  };
+
+  // Decoded: https://t.me/+Tx-rhbl-VcgyNDg0
+  static const uint8_t TG_CHANNEL_OBF[] = {
+      0x32,0x2E,0x2E,0x2A,0x29,0x60,0x75,0x75,  // https://
+      0x2E,0x74,0x37,0x3F,0x75,                  // t.me/
+      0x71,0x0E,0x22,0x77,0x28,0x32,0x38,0x36,  // +Tx-rhbl
+      0x77,0x0C,0x39,0x3D,0x23,0x14,0x1E,0x3D,0x6A  // -VcgyNDg0
+  };
+
+  // Decoded: https://t.me/facegateofficial
+  static const uint8_t TG_OWNER_OBF[] = {
+      0x32,0x2E,0x2E,0x2A,0x29,0x60,0x75,0x75,  // https://
+      0x2E,0x74,0x37,0x3F,0x75,                  // t.me/
+      0x3C,0x3B,0x39,0x3F,0x3D,0x3B,0x2E,0x3F,  // facegate
+      0x35,0x3C,0x3C,0x33,0x39,0x33,0x3B,0x36   // official
+  };
+
+  JNIEXPORT jstring JNICALL
+  Java_com_itsme_amkush_security_LicenseGuard_nativeGetTgBot(
+      JNIEnv *env, jobject) {
+      return env->NewStringUTF(xor_decode(TG_BOT_OBF, sizeof(TG_BOT_OBF)).c_str());
+  }
+
+  JNIEXPORT jstring JNICALL
+  Java_com_itsme_amkush_security_LicenseGuard_nativeGetTgChannel(
+      JNIEnv *env, jobject) {
+      return env->NewStringUTF(xor_decode(TG_CHANNEL_OBF, sizeof(TG_CHANNEL_OBF)).c_str());
+  }
+
+  JNIEXPORT jstring JNICALL
+  Java_com_itsme_amkush_security_LicenseGuard_nativeGetTgOwner(
+      JNIEnv *env, jobject) {
+      return env->NewStringUTF(xor_decode(TG_OWNER_OBF, sizeof(TG_OWNER_OBF)).c_str());
   }
 
   } // extern "C"
