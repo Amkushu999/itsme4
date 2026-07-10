@@ -143,9 +143,10 @@ private fun SplashContent(onFinished: () -> Unit) {
         }
     }
 
-    // Boot sequence — runs once, then hands off to the caller
+    // Boot sequence — runs once, exactly matching the reference animation's timings,
+    // then hands off to the caller (which opens All Files Access settings).
     LaunchedEffect(Unit) {
-        delay(400)
+        delay(500)
 
         for (i in LOGS.indices) {
             glitchIdx = i
@@ -168,7 +169,7 @@ private fun SplashContent(onFinished: () -> Unit) {
 
         progress = 100
         ready = true
-        delay(900)
+        delay(2400)
         onFinished()
     }
 
