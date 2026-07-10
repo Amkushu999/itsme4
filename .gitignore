@@ -54,6 +54,23 @@ testem.log
 # System Files
 Thumbs.db
 
-# Replit
+# Replit workspace — never commit these
 .cache/
 .local/
+.agents/
+.replit
+.replitignore
+.npmrc
+replit.md
+artifacts/
+scripts/
+lib/
+pnpm-workspace.yaml
+pnpm-lock.yaml
+package.json
+tsconfig.json
+tsconfig.base.json
+node_modules/
+repo_work/
+attached_assets/
+screenshots/
