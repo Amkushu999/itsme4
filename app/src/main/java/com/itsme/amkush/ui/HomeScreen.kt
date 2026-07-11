@@ -257,725 +257,822 @@ return "Unavailable"
 @SuppressLint("QueryPermissionsNeeded")
 @Composable
 private fun HomeScreenContent(
-onShowAdmin: () -> Unit,
-onProceedToDashboard: (AppInfo) -> Unit,
-onProceedToPayment: (AppInfo) -> Unit
+    onShowAdmin: () -> Unit,
+    onProceedToDashboard: (AppInfo) -> Unit,
+    onProceedToPayment: (AppInfo) -> Unit
 ) {
-val context = LocalContext.current
-var appList      by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
- var loading      by remember { mutableStateOf(true) }
- var selectedApp  by remember { mutableStateOf<AppInfo?>(null) }
- var showAppList  by remember { mutableStateOf(false) }
- var search       by remember { mutableStateOf("") }
- var locking      by remember { mutableStateOf(false) }
- // IP address — refreshed every 5 seconds
- var ipAddress by remember { mutableStateOf(getCurrentIpAddress(context)) }
- LaunchedEffect(Unit) {
-     while (true) {
-         ipAddress = getCurrentIpAddress(context)
-         delay(5_000)
-     }
- }
- // Frame count from AppState (refresh every second)
- var frameCount by remember { mutableStateOf(0) }
- val isInjecting = remember { mutableStateOf(InjectionService.isRunning) }
- LaunchedEffect(Unit) {
-     while (true) {
-         isInjecting.value = InjectionService.isRunning
-         frameCount = AppState.frameCount.get().toInt()
-         delay(1_000)
-     }
- }
- val hasStream = (SharedPrefs.getStreamUrl() ?: "").isNotEmpty()
- val mediaReady = isInjecting.value && hasStream
- val filteredApps = remember(appList, search) {
-     val q = search.lowercase().trim()
-     if (q.isEmpty()) appList
-     else appList.filter { it.appName.lowercase().contains(q) || it.packageName.lowercase().contains(q) }
- }
- // FG logo rotation
- val infiniteTransition = rememberInfiniteTransition(label = "logoRot")
- val rotation by infiniteTransition.animateFloat(
-     initialValue = 0f,
-     targetValue = 360f,
-     animationSpec = infiniteRepeatable(
-         animation = tween(durationMillis = 8000, easing = LinearEasing),
-         repeatMode = RepeatMode.Restart
-     ),
-     label = "logoRotation"
- )
- // Load installed apps
- LaunchedEffect(Unit) {
-     withContext(Dispatchers.IO) {
-         try {
-             val pm = context.packageManager
-             val pkgs = pm.getInstalledApplications(0)
-             val apps = pkgs
-                 .filter { pkg ->
-                     val isSys = (pkg.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
-                     val isUpdatedSys = (pkg.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                     // Keep only pure user-installed apps; exclude system apps and this module itself
-                     (!isSys || isUpdatedSys) && pkg.packageName != context.packageName
-                 }
-                 .map { pkg ->
-                     val name = pm.getApplicationLabel(pkg).toString()
-                     val icon = try { pm.getApplicationIcon(pkg) } catch (_: Exception) { null }
-                     AppInfo(pkg.packageName, name, icon, false)
-                 }
-                 .sortedBy { it.appName.lowercase() }
-             withContext(Dispatchers.Main) {
-                 appList = apps
-                 loading = false
-             }
-         } catch (e: Exception) {
-             withContext(Dispatchers.Main) {
-                 loading = false
-                 Logger.e("Error loading apps", e)
-             }
-         }
-     }
- }
- LaunchedEffect(appList) {
-     if (appList.isNotEmpty()) {
-         val pkg  = SharedPrefs.getTargetPackage()
-         val name = SharedPrefs.getTargetAppName()
-         if (!pkg.isNullOrEmpty() && !name.isNullOrEmpty()) {
-             val found = appList.find { it.packageName == pkg }
-             if (found != null) selectedApp = found
-             else if (selectedApp == null) selectedApp = AppInfo(pkg, name, null)
-         }
-     }
- }
- fun handleSelectApp(app: AppInfo) {
-     selectedApp = app
-     showAppList = false
-     search = ""
-     SharedPrefs.setTargetPackage(app.packageName)
-     SharedPrefs.setTargetAppName(app.appName)
- }
- fun handleRestart() {
-     selectedApp = null
-     showAppList = false
-     search = ""
-     SharedPrefs.clearTarget()
-     SharedPrefs.setStreamUrl(null)
-     SharedPrefs.setStreamType(null)
-     SharedPrefs.setLastUsedUrl(null)
-     if (InjectionService.isRunning) {
-         InjectionService.stop(context)
-         isInjecting.value = false
-     }
-     Toast.makeText(context, "System reset", Toast.LENGTH_SHORT).show()
- }
- fun openTelegram() {
-     try {
-         val url = LicenseGuard.nativeGetTgOwner()
-         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-     } catch (_: Exception) {
-         Toast.makeText(context, "Could not open Telegram", Toast.LENGTH_SHORT).show()
-     }
- }
- fun handleHookCamera() {
-     val app = selectedApp ?: run { showAppList = true; return }
-     locking = true
-     CoroutineScope(Dispatchers.IO).launch {
-         val token = SharedPrefs.getActivationToken()
-         if (!token.isNullOrEmpty()) {
-             try {
-                 val deviceId = DeviceUtils.getDeviceId(context)
-                 val request  = TokenRequest(token, deviceId)
-                 val response = ApiClient.getApiService().verifyToken(request).execute()
-                 withContext(Dispatchers.Main) {
-                     locking = false
-                     if (response.isSuccessful && response.body()?.valid == true) {
-                         onProceedToDashboard(app)
-                     } else {
-                         onProceedToPayment(app)
-                     }
-                 }
-             } catch (e: Exception) {
-                 withContext(Dispatchers.Main) {
-                     locking = false
-                     onProceedToPayment(app)
-                 }
-             }
-         } else {
-             withContext(Dispatchers.Main) {
-                 locking = false
-                 onProceedToPayment(app)
-             }
-         }
-     }
- }
- Box(
-     modifier = Modifier
-         .fillMaxSize()
-         .background(BgDark)
-         .systemBarsPadding()
- ) {
-     Column(
-         modifier = Modifier
-             .fillMaxSize()
-             .verticalScroll(rememberScrollState())
-     ) {
-         // ── Top Bar ──────────────────────────────────────────────────────
-         Row(
-             modifier = Modifier
-                 .fillMaxWidth()
-                 .padding(horizontal = 20.dp, vertical = 16.dp),
-             verticalAlignment = Alignment.CenterVertically,
-             horizontalArrangement = Arrangement.SpaceBetween
-         ) {
-             // FG logo + title
-             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                 // Rotating FG logo
-                 Box(
-                     modifier = Modifier
-                         .size(52.dp)
-                         .rotate(rotation)
-                         .background(
-                             brush = Brush.sweepGradient(listOf(Violet, Pink, Cyan, Violet)),
-                             shape = CircleShape
-                         )
-                         .padding(2.dp),
-                     contentAlignment = Alignment.Center
-                 ) {
-                     Box(
-                         modifier = Modifier
-                             .fillMaxSize()
-                             .background(BgDark, CircleShape),
-                         contentAlignment = Alignment.Center
-                     ) {
-                         Text(
-                             "FG",
-                             color = Color.White,
-                             fontWeight = FontWeight.Black,
-                             fontSize = 16.sp,
-                             letterSpacing = 1.sp
-                         )
-                     }
-                 }
-                 Column {
-                     Text(
-                         "FACEGATE",
-                         color = Color.White,
-                         fontWeight = FontWeight.Black,
-                         fontSize = 18.sp,
-                         letterSpacing = 3.sp
-                     )
-                     Text(
-                         "Camera Access System",
-                         color = Cyan.copy(alpha = 0.7f),
-                         fontSize = 10.sp,
-                         letterSpacing = 0.5.sp
-                     )
-                 }
-             }
-             // Mode badge + Admin icon
-             Row(
-                 verticalAlignment = Alignment.CenterVertically,
-                 horizontalArrangement = Arrangement.spacedBy(8.dp)
-             ) {
-                 // Mode badge pill
-                 val isRoot = SharedPrefs.isRootMode()
-                 val modeSelected = SharedPrefs.isModeSelected()
-                 if (modeSelected) {
-                     Box(
-                         modifier = Modifier
-                             .clip(RoundedCornerShape(6.dp))
-                             .background(
-                                 if (isRoot) Color(0xFF00FF64).copy(alpha = 0.08f)
-                                 else Color(0xFFFF2828).copy(alpha = 0.08f)
-                             )
-                             .border(
-                                 1.dp,
-                                 if (isRoot) Color(0xFF00FF64).copy(alpha = 0.5f)
-                                 else Color(0xFFFF2828).copy(alpha = 0.5f),
-                                 RoundedCornerShape(6.dp)
-                             )
-                             .padding(horizontal = 8.dp, vertical = 4.dp)
-                     ) {
-                         Row(
-                             verticalAlignment = Alignment.CenterVertically,
-                             horizontalArrangement = Arrangement.spacedBy(5.dp)
-                         ) {
-                             Box(
-                                 modifier = Modifier.size(6.dp).background(
-                                     if (isRoot) Color(0xFF00FF64) else Color(0xFFFF2828),
-                                     CircleShape
-                                 )
-                             )
-                             Text(
-                                 if (isRoot) "ROOT" else "NON-ROOT",
-                                 color = if (isRoot) Color(0xFF00FF64) else Color(0xFFFF2828),
-                                 fontSize = 9.sp,
-                                 fontWeight = FontWeight.Bold,
-                                 letterSpacing = 1.sp
-                             )
-                         }
-                     }
-                 }
-                 // Admin icon button — shows FaceGate app icon (or fallback shield)
-                 val fgIconBitmap = remember {
-                     try {
-                         val drawable = context.packageManager.getApplicationIcon(context.packageName)
-                         drawableToBitmap(drawable)
-                     } catch (_: Exception) { null }
-                 }
-                 Box(
-                     modifier = Modifier
-                         .size(44.dp)
-                         .background(Color(0x226C63FF), CircleShape)
-                         .border(1.dp, Violet.copy(alpha = 0.4f), CircleShape)
-                         .clickable { onShowAdmin() },
-                     contentAlignment = Alignment.Center
-                 ) {
-                     if (fgIconBitmap != null) {
-                         androidx.compose.foundation.Image(
-                             bitmap = fgIconBitmap.asImageBitmap(),
-                             contentDescription = "Admin",
-                             modifier = Modifier.size(32.dp).clip(CircleShape)
-                         )
-                     } else {
-                         // Fallback: shield silhouette
-                         Canvas(modifier = Modifier.size(22.dp)) {
-                             val w = size.width; val h = size.height
-                             drawCircle(color = Color(0xFFAAAAAA), radius = w * 0.22f,
-                                 center = Offset(w * 0.5f, h * 0.28f))
-                             drawArc(color = Color(0xFFAAAAAA), startAngle = 180f,
-                                 sweepAngle = 180f, useCenter = false,
-                                 topLeft = Offset(w * 0.15f, h * 0.52f),
-                                 size = androidx.compose.ui.geometry.Size(w * 0.7f, h * 0.36f))
-                         }
-                     }
-                 }
-             }
-         }
-         Column(
-             modifier = Modifier
-                 .fillMaxWidth()
-                 .padding(horizontal = 16.dp),
-             verticalArrangement = Arrangement.spacedBy(14.dp)
-         ) {
-             // ── IP + Status Card ─────────────────────────────────────────
-             Box(
-                 modifier = Modifier
-                     .fillMaxWidth()
-                     .clip(RoundedCornerShape(20.dp))
-                     .background(Color(0xFF0F1624))
-                     .border(1.dp, Border, RoundedCornerShape(20.dp))
-                     .padding(horizontal = 20.dp, vertical = 18.dp)
-             ) {
-                 Column {
-                     // IP Address
-                     Text(
-                         text = ipAddress,
-                         color = Cyan,
-                         fontSize = 26.sp,
-                         fontWeight = FontWeight.Bold,
-                         fontFamily = FontFamily.Monospace,
-                         modifier = Modifier.fillMaxWidth(),
-                         textAlign = TextAlign.Center
-                     )
-                     Spacer(Modifier.height(16.dp))
-                     // Status row
-                     Row(
-                         modifier = Modifier.fillMaxWidth(),
-                         verticalAlignment = Alignment.CenterVertically,
-                         horizontalArrangement = Arrangement.SpaceBetween
-                     ) {
-                         Column {
-                             Row(
-                                 verticalAlignment = Alignment.CenterVertically,
-                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
-                             ) {
-                                 val pulse = rememberInfiniteTransition(label = "dot")
-                                 val dotAlpha by pulse.animateFloat(
-                                     initialValue = 1f,
-                                     targetValue = 0.3f,
-                                     animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-                                     label = "dotAlpha"
-                                 )
-                                 Box(
-                                     modifier = Modifier
-                                         .size(10.dp)
-                                         .background(
-                                             color = if (mediaReady) GreenOk.copy(alpha = dotAlpha) else OrangeWait.copy(alpha = dotAlpha),
-                                             shape = CircleShape
-                                         )
-                                 )
-                                 Text(
-                                     text = if (mediaReady) "MEDIA READY" else "WAITING",
-                                     color = if (mediaReady) GreenOk else OrangeWait,
-                                     fontSize = 12.sp,
-                                     fontWeight = FontWeight.Bold,
-                                     letterSpacing = 1.sp
-                                 )
-                             }
-                             Spacer(Modifier.height(4.dp))
-                             Text(
-                                 text = if (mediaReady) "Stream available for hook" else "No media stream detected",
-                                 color = TextMid,
-                                 fontSize = 11.sp
-                             )
-                         }
-                         if (mediaReady) {
-                             Column(horizontalAlignment = Alignment.End) {
-                                 Text(
-                                     text = "$frameCount",
-                                     color = GreenOk,
-                                     fontSize = 28.sp,
-                                     fontWeight = FontWeight.Bold,
-                                     fontFamily = FontFamily.Monospace
-                                 )
-                                 Text(
-                                     text = "FRAMES",
-                                     color = GreenOk.copy(alpha = 0.7f),
-                                     fontSize = 10.sp,
-                                     fontWeight = FontWeight.Bold,
-                                     letterSpacing = 1.sp
-                                 )
-                             }
-                         }
-                     }
-                 }
-             }
-             // ── Target App Card ──────────────────────────────────────────
-             Box(
-                 modifier = Modifier
-                     .fillMaxWidth()
-                     .clip(RoundedCornerShape(20.dp))
-                     .background(Color(0xFF0F1624))
-                     .border(1.dp, Border, RoundedCornerShape(20.dp))
-                     .clickable { if (selectedApp == null) showAppList = !showAppList }
-                     .padding(16.dp)
-             ) {
-                 if (selectedApp != null) {
-                     val app = selectedApp!!
-                     Row(
-                         verticalAlignment = Alignment.CenterVertically,
-                         horizontalArrangement = Arrangement.spacedBy(16.dp)
-                     ) {
-                         // App Icon with border
-                         val icon = app.icon
-                         if (icon != null) {
-                             val bitmap = remember(app.packageName) { drawableToBitmap(icon) }
-                             if (bitmap != null) {
-                                 Image(
-                                     bitmap = bitmap.asImageBitmap(),
-                                     contentDescription = app.appName,
-                                     modifier = Modifier
-                                         .size(50.dp)
-                                         .clip(RoundedCornerShape(12.dp))
-                                         .border(1.dp, Pink.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                                 )
-                             } else {
-                                 AppIconCircle(app = app, size = 50.dp, cornerRadius = 12.dp)
-                             }
-                         } else {
-                             AppIconCircle(app = app, size = 50.dp, cornerRadius = 12.dp)
-                         }
-                         
-                         Column(Modifier.weight(1f)) {
-                             Text(
-                                 "TARGET LOCKED",
-                                 color = Pink,
-                                 fontSize = 10.sp,
-                                 fontWeight = FontWeight.Bold,
-                                 letterSpacing = 0.5.sp
-                             )
-                             Spacer(Modifier.height(4.dp))
-                             Text(
-                                 app.appName,
-                                 color = Color.White,
-                                 fontWeight = FontWeight.Bold,
-                                 fontSize = 17.sp,
-                                 maxLines = 1,
-                                 overflow = TextOverflow.Ellipsis
-                             )
-                         }
-                         
-                         Box(
-                             modifier = Modifier
-                                 .size(36.dp)
-                                 .background(Pink.copy(alpha = 0.15f), CircleShape)
-                                 .clickable { selectedApp = null; SharedPrefs.clearTarget() },
-                             contentAlignment = Alignment.Center
-                         ) {
-                             Icon(
-                                 imageVector = Icons.Filled.Close,
-                                 contentDescription = "Clear",
-                                 tint = Pink,
-                                 modifier = Modifier.size(20.dp)
-                             )
-                         }
-                     }
-                 } else {
-                     Row(
-                         verticalAlignment = Alignment.CenterVertically,
-                         horizontalArrangement = Arrangement.spacedBy(16.dp)
-                     ) {
-                         Icon(
-                             imageVector = Icons.Filled.CameraAlt,
-                             contentDescription = "Camera",
-                             tint = InactiveGray,
-                             modifier = Modifier.size(50.dp)
-                         )
-                         
-                         Column(Modifier.weight(1f)) {
-                             Text(
-                                 "SELECT TARGET",
-                                 color = InactiveGray,
-                                 fontWeight = FontWeight.Bold,
-                                 fontSize = 15.sp
-                             )
-                             Spacer(Modifier.height(4.dp))
-                             Text(
-                                 "Choose app to hook camera",
-                                 color = TextTertiary,
-                                 fontSize = 12.sp
-                             )
-                         }
-                         
-                         Icon(
-                             imageVector = Icons.Filled.ChevronRight,
-                             contentDescription = "Arrow",
-                             tint = TextTertiary,
-                             modifier = Modifier.size(28.dp)
-                         )
-                     }
-                 }
-             }
-             // ── App List ─────────────────────────────────────────────────
-             AnimatedVisibility(
-                 visible = showAppList,
-                 enter = expandVertically() + fadeIn(),
-                 exit = shrinkVertically() + fadeOut()
-             ) {
-                 Column(
-                     modifier = Modifier
-                         .fillMaxWidth()
-                         .clip(RoundedCornerShape(20.dp))
-                         .background(Color(0x0DFFFFFF))
-                         .border(1.dp, Border, RoundedCornerShape(20.dp))
-                 ) {
-                     Row(
-                         modifier = Modifier
-                             .fillMaxWidth()
-                             .padding(horizontal = 16.dp, vertical = 12.dp),
-                         verticalAlignment = Alignment.CenterVertically,
-                         horizontalArrangement = Arrangement.spacedBy(8.dp)
-                     ) {
-                         Text("🔍", fontSize = 13.sp, color = TextMid)
-                         BasicTextField(
-                             value = search,
-                             onValueChange = { search = it },
-                             modifier = Modifier.weight(1f),
-                             textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
-                             singleLine = true,
-                             decorationBox = { inner ->
-                                 if (search.isEmpty()) Text("Search apps...", color = TextSec, fontSize = 14.sp)
-                                 inner()
-                             },
-                             cursorBrush = SolidColor(Violet)
-                         )
-                         if (search.isNotEmpty()) {
-                             Text("✕", modifier = Modifier.clickable { search = "" }, color = TextSec, fontSize = 13.sp)
-                         }
-                     }
-                     HorizontalDivider(color = Color(0x14FFFFFF))
-                     if (loading) {
-                         Box(Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-                             CircularProgressIndicator(color = Violet, modifier = Modifier.size(28.dp))
-                         }
-                     } else {
-                         LazyColumn(modifier = Modifier.heightIn(max = 260.dp)) {
-                             items(filteredApps, key = { it.packageName }) { app ->
-                                 Row(
-                                     modifier = Modifier
-                                         .fillMaxWidth()
-                                         .clickable { handleSelectApp(app) }
-                                         .padding(horizontal = 16.dp, vertical = 10.dp),
-                                     verticalAlignment = Alignment.CenterVertically,
-                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                 ) {
-                                     AppIconCircle(app = app, size = 40.dp)
-                                     Column(Modifier.weight(1f)) {
-                                         Text(app.appName, color = Color.White, fontSize = 13.sp,
-                                             fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                         Text(app.packageName, color = TextSec, fontSize = 9.sp,
-                                             fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                     }
-                                     if (selectedApp?.packageName == app.packageName) {
-                                         Text("✔", color = Violet, fontSize = 14.sp)
-                                     }
-                                 }
-                                 HorizontalDivider(color = Color(0x0AFFFFFF))
-                             }
-                         }
-                     }
-                 }
-             }
-             // ── Action Buttons ───────────────────────────────────────────
-             // Restart System
-             Box(
-                 modifier = Modifier
-                     .fillMaxWidth()
-                     .height(52.dp)
-                     .clip(RoundedCornerShape(16.dp))
-                     .background(Color(0xFF0F1624))
-                     .border(1.dp, Cyan.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
-                     .clickable { handleRestart() },
-                 contentAlignment = Alignment.Center
-             ) {
-                 Row(
-                     verticalAlignment = Alignment.CenterVertically,
-                     horizontalArrangement = Arrangement.spacedBy(10.dp)
-                 ) {
-                     // Refresh icon drawn
-                     Canvas(modifier = Modifier.size(18.dp)) {
-                         val r = size.minDimension * 0.38f
-                         drawArc(
-                             color = Cyan,
-                             startAngle = -30f,
-                             sweepAngle = 270f,
-                             useCenter = false,
-                             topLeft = Offset(size.width / 2f - r, size.height / 2f - r),
-                             size = androidx.compose.ui.geometry.Size(r * 2f, r * 2f),
-                             style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f)
-                         )
-                         // Arrow head
-                         val tipX = size.width / 2f + r
-                         val tipY = size.height / 2f
-                         drawLine(Cyan, Offset(tipX - 4f, tipY - 4f), Offset(tipX, tipY), strokeWidth = 2.5f)
-                         drawLine(Cyan, Offset(tipX - 4f, tipY + 4f), Offset(tipX, tipY), strokeWidth = 2.5f)
-                     }
-                     Text(
-                         "Restart System",
-                         color = Cyan,
-                         fontWeight = FontWeight.SemiBold,
-                         fontSize = 14.sp
-                     )
-                 }
-             }
-             // Support & Updates
-             Box(
-                 modifier = Modifier
-                     .fillMaxWidth()
-                     .height(52.dp)
-                     .clip(RoundedCornerShape(16.dp))
-                     .background(Color(0xFF0F1624))
-                     .border(1.dp, Cyan.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
-                     .clickable { openTelegram() },
-                 contentAlignment = Alignment.Center
-             ) {
-                 Row(
-                     verticalAlignment = Alignment.CenterVertically,
-                     horizontalArrangement = Arrangement.spacedBy(10.dp)
-                 ) {
-                     // Telegram-style send icon
-                     Canvas(modifier = Modifier.size(18.dp)) {
-                         val pts = listOf(
-                             Offset(size.width * 0.05f, size.height * 0.5f),
-                             Offset(size.width * 0.95f, size.height * 0.12f),
-                             Offset(size.width * 0.62f, size.height * 0.88f),
-                             Offset(size.width * 0.38f, size.height * 0.62f),
-                             Offset(size.width * 0.05f, size.height * 0.5f),
-                         )
-                         for (i in 0 until pts.size - 1) {
-                             drawLine(Cyan, pts[i], pts[i + 1], strokeWidth = 2f)
-                         }
-                         drawLine(Cyan, pts[3], pts[1], strokeWidth = 2f)
-                     }
-                     Text(
-                         "Support & Updates",
-                         color = Cyan,
-                         fontWeight = FontWeight.SemiBold,
-                         fontSize = 14.sp
-                     )
-                 }
-             }
-             Spacer(Modifier.height(80.dp))
-         }
-     }
-     // ── Bottom Hook / Select Button ───────────────────────────────────────
-     Box(
-         modifier = Modifier
-             .align(Alignment.BottomCenter)
-             .fillMaxWidth()
-             .padding(horizontal = 16.dp, vertical = 16.dp)
-     ) {
-         val hasApp = selectedApp != null
-         Box(
-             modifier = Modifier
-                 .fillMaxWidth()
-                 .height(64.dp)
-                 .clip(RoundedCornerShape(20.dp))
-                 .then(
-                     if (hasApp)
-                         Modifier.background(Brush.linearGradient(listOf(RedHook, Pink)))
-                     else
-                         Modifier.background(Color(0xFF1E2330))
-                 )
-                 .clickable(enabled = !locking) {
-                     if (hasApp) handleHookCamera() else showAppList = !showAppList
-                 },
-             contentAlignment = Alignment.Center
-         ) {
-             if (locking) {
-                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                     CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                     Text("Locking...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                 }
-             } else if (hasApp) {
-                 Row(
-                     verticalAlignment = Alignment.CenterVertically,
-                     horizontalArrangement = Arrangement.spacedBy(12.dp)
-                 ) {
-                     Icon(
-                         imageVector = Icons.Filled.Videocam,
-                         contentDescription = "Camera",
-                         tint = Color.White,
-                         modifier = Modifier.size(24.dp)
-                     )
-                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                         Text(
-                             "HOOK CAMERA",
-                             color = Color.White,
-                             fontWeight = FontWeight.Black,
-                             fontSize = 15.sp,
-                             letterSpacing = 1.sp
-                         )
-                         Text(
-                             "Tap to inject camera hook",
-                             color = Color.White.copy(alpha = 0.8f),
-                             fontSize = 10.sp
-                         )
-                     }
-                 }
-             } else {
-                 Row(
-                     verticalAlignment = Alignment.CenterVertically,
-                     horizontalArrangement = Arrangement.spacedBy(12.dp)
-                 ) {
-                     Icon(
-                         imageVector = Icons.Filled.Lock,
-                         contentDescription = "Lock",
-                         tint = Color.White,
-                         modifier = Modifier.size(24.dp)
-                     )
-                     Text(
-                         "SELECT TARGET",
-                         color = Color.White,
-                         fontWeight = FontWeight.Black,
-                         fontSize = 16.sp,
-                         letterSpacing = 1.sp
-                     )
-                 }
-             }
-         }
-     }
- }
+    val context = LocalContext.current
+    var appList      by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
+    var loading      by remember { mutableStateOf(true) }
+    var selectedApp  by remember { mutableStateOf<AppInfo?>(null) }
+    var showAppList  by remember { mutableStateOf(false) }
+    var search       by remember { mutableStateOf("") }
+    var locking      by remember { mutableStateOf(false) }
+    // IP address — refreshed every 5 seconds
+    var ipAddress by remember { mutableStateOf(getCurrentIpAddress(context)) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            ipAddress = getCurrentIpAddress(context)
+            delay(5_000)
+        }
+    }
+    // Frame count from AppState (refresh every second)
+    var frameCount by remember { mutableStateOf(0) }
+    val isInjecting = remember { mutableStateOf(InjectionService.isRunning) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            isInjecting.value = InjectionService.isRunning
+            frameCount = AppState.frameCount.get().toInt()
+            delay(1_000)
+        }
+    }
+    val hasStream = (SharedPrefs.getStreamUrl() ?: "").isNotEmpty()
+    val mediaReady = isInjecting.value && hasStream
+    val filteredApps = remember(appList, search) {
+        val q = search.lowercase().trim()
+        if (q.isEmpty()) appList
+        else appList.filter { it.appName.lowercase().contains(q) || it.packageName.lowercase().contains(q) }
+    }
+    // FG logo rotation
+    val infiniteTransition = rememberInfiniteTransition(label = "logoRot")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 8000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "logoRotation"
+    )
+    // Load installed apps
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            try {
+                val pm = context.packageManager
+                val pkgs = pm.getInstalledApplications(0)
+                val apps = pkgs
+                    .filter { pkg ->
+                        val isSys = (pkg.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+                        val isUpdatedSys = (pkg.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                        // Keep only pure user-installed apps; exclude system apps and this module itself
+                        (!isSys || isUpdatedSys) && pkg.packageName != context.packageName
+                    }
+                    .map { pkg ->
+                        val name = pm.getApplicationLabel(pkg).toString()
+                        val icon = try { pm.getApplicationIcon(pkg) } catch (_: Exception) { null }
+                        AppInfo(pkg.packageName, name, icon, false)
+                    }
+                    .sortedBy { it.appName.lowercase() }
+                withContext(Dispatchers.Main) {
+                    appList = apps
+                    loading = false
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    loading = false
+                    Logger.e("Error loading apps", e)
+                }
+            }
+        }
+    }
+    LaunchedEffect(appList) {
+        if (appList.isNotEmpty()) {
+            val pkg  = SharedPrefs.getTargetPackage()
+            val name = SharedPrefs.getTargetAppName()
+            if (!pkg.isNullOrEmpty() && !name.isNullOrEmpty()) {
+                val found = appList.find { it.packageName == pkg }
+                if (found != null) selectedApp = found
+                else if (selectedApp == null) selectedApp = AppInfo(pkg, name, null)
+            }
+        }
+    }
+    fun handleSelectApp(app: AppInfo) {
+        selectedApp = app
+        showAppList = false
+        search = ""
+        SharedPrefs.setTargetPackage(app.packageName)
+        SharedPrefs.setTargetAppName(app.appName)
+    }
+    fun handleRestart() {
+        selectedApp = null
+        showAppList = false
+        search = ""
+        SharedPrefs.clearTarget()
+        SharedPrefs.setStreamUrl(null)
+        SharedPrefs.setStreamType(null)
+        SharedPrefs.setLastUsedUrl(null)
+        if (InjectionService.isRunning) {
+            InjectionService.stop(context)
+            isInjecting.value = false
+        }
+        Toast.makeText(context, "System reset", Toast.LENGTH_SHORT).show()
+    }
+    fun openTelegram() {
+        try {
+            val url = LicenseGuard.nativeGetTgOwner()
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: Exception) {
+            Toast.makeText(context, "Could not open Telegram", Toast.LENGTH_SHORT).show()
+        }
+    }
+    fun handleHookCamera() {
+        val app = selectedApp ?: run { showAppList = true; return }
+        locking = true
+        CoroutineScope(Dispatchers.IO).launch {
+            val token = SharedPrefs.getActivationToken()
+            if (!token.isNullOrEmpty()) {
+                try {
+                    val deviceId = DeviceUtils.getDeviceId(context)
+                    val request  = TokenRequest(token, deviceId)
+                    val response = ApiClient.getApiService().verifyToken(request).execute()
+                    withContext(Dispatchers.Main) {
+                        locking = false
+                        if (response.isSuccessful && response.body()?.valid == true) {
+                            onProceedToDashboard(app)
+                        } else {
+                            onProceedToPayment(app)
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        locking = false
+                        onProceedToPayment(app)
+                    }
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    locking = false
+                    onProceedToPayment(app)
+                }
+            }
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BgDark)
+            .systemBarsPadding()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+        ) {
+            HomeTopBar(rotation = rotation, onShowAdmin = onShowAdmin)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                IpStatusCard(
+                    ipAddress = ipAddress,
+                    mediaReady = mediaReady,
+                    frameCount = frameCount
+                )
+                TargetAppCard(
+                    selectedApp = selectedApp,
+                    onCardClick = { if (selectedApp == null) showAppList = !showAppList },
+                    onClear = { selectedApp = null; SharedPrefs.clearTarget() }
+                )
+                AppListSection(
+                    visible = showAppList,
+                    loading = loading,
+                    search = search,
+                    onSearchChange = { search = it },
+                    filteredApps = filteredApps,
+                    selectedApp = selectedApp,
+                    onSelectApp = ::handleSelectApp
+                )
+                ActionButtonsSection(
+                    onRestart = ::handleRestart,
+                    onSupport = ::openTelegram
+                )
+                Spacer(Modifier.height(80.dp))
+            }
+        }
+        BottomHookButton(
+            selectedApp = selectedApp,
+            locking = locking,
+            onHook = ::handleHookCamera,
+            onToggleAppList = { showAppList = !showAppList }
+        )
+    }
+}
+
+// ── Home: Top Bar ───────────────────────────────────────────────────────────
+@Composable
+private fun HomeTopBar(
+    rotation: Float,
+    onShowAdmin: () -> Unit
+) {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        // FG logo + title
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Rotating FG logo
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .rotate(rotation)
+                    .background(
+                        brush = Brush.sweepGradient(listOf(Violet, Pink, Cyan, Violet)),
+                        shape = CircleShape
+                    )
+                    .padding(2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(BgDark, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "FG",
+                        color = Color.White,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 16.sp,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+            Column {
+                Text(
+                    "FACEGATE",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 18.sp,
+                    letterSpacing = 3.sp
+                )
+                Text(
+                    "Camera Access System",
+                    color = Cyan.copy(alpha = 0.7f),
+                    fontSize = 10.sp,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+        // Mode badge + Admin icon
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Mode badge pill
+            val isRoot = SharedPrefs.isRootMode()
+            val modeSelected = SharedPrefs.isModeSelected()
+            if (modeSelected) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            if (isRoot) Color(0xFF00FF64).copy(alpha = 0.08f)
+                            else Color(0xFFFF2828).copy(alpha = 0.08f)
+                        )
+                        .border(
+                            1.dp,
+                            if (isRoot) Color(0xFF00FF64).copy(alpha = 0.5f)
+                            else Color(0xFFFF2828).copy(alpha = 0.5f),
+                            RoundedCornerShape(6.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.size(6.dp).background(
+                                if (isRoot) Color(0xFF00FF64) else Color(0xFFFF2828),
+                                CircleShape
+                            )
+                        )
+                        Text(
+                            if (isRoot) "ROOT" else "NON-ROOT",
+                            color = if (isRoot) Color(0xFF00FF64) else Color(0xFFFF2828),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+            }
+            // Admin icon button — shows FaceGate app icon (or fallback shield)
+            val fgIconBitmap = remember {
+                try {
+                    val drawable = context.packageManager.getApplicationIcon(context.packageName)
+                    drawableToBitmap(drawable)
+                } catch (_: Exception) { null }
+            }
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(Color(0x226C63FF), CircleShape)
+                    .border(1.dp, Violet.copy(alpha = 0.4f), CircleShape)
+                    .clickable { onShowAdmin() },
+                contentAlignment = Alignment.Center
+            ) {
+                if (fgIconBitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = fgIconBitmap.asImageBitmap(),
+                        contentDescription = "Admin",
+                        modifier = Modifier.size(32.dp).clip(CircleShape)
+                    )
+                } else {
+                    // Fallback: shield silhouette
+                    Canvas(modifier = Modifier.size(22.dp)) {
+                        val w = size.width; val h = size.height
+                        drawCircle(color = Color(0xFFAAAAAA), radius = w * 0.22f,
+                            center = Offset(w * 0.5f, h * 0.28f))
+                        drawArc(color = Color(0xFFAAAAAA), startAngle = 180f,
+                            sweepAngle = 180f, useCenter = false,
+                            topLeft = Offset(w * 0.15f, h * 0.52f),
+                            size = androidx.compose.ui.geometry.Size(w * 0.7f, h * 0.36f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Home: IP + Status Card ──────────────────────────────────────────────────
+@Composable
+private fun IpStatusCard(
+    ipAddress: String,
+    mediaReady: Boolean,
+    frameCount: Int
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF0F1624))
+            .border(1.dp, Border, RoundedCornerShape(20.dp))
+            .padding(horizontal = 20.dp, vertical = 18.dp)
+    ) {
+        Column {
+            // IP Address
+            Text(
+                text = ipAddress,
+                color = Cyan,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(16.dp))
+            // Status row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val pulse = rememberInfiniteTransition(label = "dot")
+                        val dotAlpha by pulse.animateFloat(
+                            initialValue = 1f,
+                            targetValue = 0.3f,
+                            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+                            label = "dotAlpha"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .background(
+                                    color = if (mediaReady) GreenOk.copy(alpha = dotAlpha) else OrangeWait.copy(alpha = dotAlpha),
+                                    shape = CircleShape
+                                )
+                        )
+                        Text(
+                            text = if (mediaReady) "MEDIA READY" else "WAITING",
+                            color = if (mediaReady) GreenOk else OrangeWait,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = if (mediaReady) "Stream available for hook" else "No media stream detected",
+                        color = TextMid,
+                        fontSize = 11.sp
+                    )
+                }
+                if (mediaReady) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "$frameCount",
+                            color = GreenOk,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "FRAMES",
+                            color = GreenOk.copy(alpha = 0.7f),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Home: Target App Card ───────────────────────────────────────────────────
+@Composable
+private fun TargetAppCard(
+    selectedApp: AppInfo?,
+    onCardClick: () -> Unit,
+    onClear: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF0F1624))
+            .border(1.dp, Border, RoundedCornerShape(20.dp))
+            .clickable { onCardClick() }
+            .padding(16.dp)
+    ) {
+        if (selectedApp != null) {
+            val app = selectedApp
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // App Icon with border
+                val icon = app.icon
+                if (icon != null) {
+                    val bitmap = remember(app.packageName) { drawableToBitmap(icon) }
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = app.appName,
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.dp, Pink.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                        )
+                    } else {
+                        AppIconCircle(app = app, size = 50.dp, cornerRadius = 12.dp)
+                    }
+                } else {
+                    AppIconCircle(app = app, size = 50.dp, cornerRadius = 12.dp)
+                }
+
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "TARGET LOCKED",
+                        color = Pink,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        app.appName,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(Pink.copy(alpha = 0.15f), CircleShape)
+                        .clickable { onClear() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Clear",
+                        tint = Pink,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.CameraAlt,
+                    contentDescription = "Camera",
+                    tint = InactiveGray,
+                    modifier = Modifier.size(50.dp)
+                )
+
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "SELECT TARGET",
+                        color = InactiveGray,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Choose app to hook camera",
+                        color = TextTertiary,
+                        fontSize = 12.sp
+                    )
+                }
+
+                Icon(
+                    imageVector = Icons.Filled.ChevronRight,
+                    contentDescription = "Arrow",
+                    tint = TextTertiary,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        }
+    }
+}
+
+// ── Home: App List (search + results) ───────────────────────────────────────
+@Composable
+private fun AppListSection(
+    visible: Boolean,
+    loading: Boolean,
+    search: String,
+    onSearchChange: (String) -> Unit,
+    filteredApps: List<AppInfo>,
+    selectedApp: AppInfo?,
+    onSelectApp: (AppInfo) -> Unit
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0x0DFFFFFF))
+                .border(1.dp, Border, RoundedCornerShape(20.dp))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("🔍", fontSize = 13.sp, color = TextMid)
+                BasicTextField(
+                    value = search,
+                    onValueChange = onSearchChange,
+                    modifier = Modifier.weight(1f),
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
+                    singleLine = true,
+                    decorationBox = { inner ->
+                        if (search.isEmpty()) Text("Search apps...", color = TextSec, fontSize = 14.sp)
+                        inner()
+                    },
+                    cursorBrush = SolidColor(Violet)
+                )
+                if (search.isNotEmpty()) {
+                    Text("✕", modifier = Modifier.clickable { onSearchChange("") }, color = TextSec, fontSize = 13.sp)
+                }
+            }
+            HorizontalDivider(color = Color(0x14FFFFFF))
+            if (loading) {
+                Box(Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Violet, modifier = Modifier.size(28.dp))
+                }
+            } else {
+                LazyColumn(modifier = Modifier.heightIn(max = 260.dp)) {
+                    items(filteredApps, key = { it.packageName }) { app ->
+                        AppListRow(
+                            app = app,
+                            isSelected = selectedApp?.packageName == app.packageName,
+                            onClick = { onSelectApp(app) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppListRow(
+    app: AppInfo,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onClick() }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            AppIconCircle(app = app, size = 40.dp)
+            Column(Modifier.weight(1f)) {
+                Text(app.appName, color = Color.White, fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(app.packageName, color = TextSec, fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (isSelected) {
+                Text("✔", color = Violet, fontSize = 14.sp)
+            }
+        }
+        HorizontalDivider(color = Color(0x0AFFFFFF))
+    }
+}
+
+// ── Home: Action Buttons (Restart / Support) ────────────────────────────────
+@Composable
+private fun ActionButtonsSection(
+    onRestart: () -> Unit,
+    onSupport: () -> Unit
+) {
+    // Restart System
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF0F1624))
+            .border(1.dp, Cyan.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+            .clickable { onRestart() },
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Refresh icon drawn
+            Canvas(modifier = Modifier.size(18.dp)) {
+                val r = size.minDimension * 0.38f
+                drawArc(
+                    color = Cyan,
+                    startAngle = -30f,
+                    sweepAngle = 270f,
+                    useCenter = false,
+                    topLeft = Offset(size.width / 2f - r, size.height / 2f - r),
+                    size = androidx.compose.ui.geometry.Size(r * 2f, r * 2f),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f)
+                )
+                // Arrow head
+                val tipX = size.width / 2f + r
+                val tipY = size.height / 2f
+                drawLine(Cyan, Offset(tipX - 4f, tipY - 4f), Offset(tipX, tipY), strokeWidth = 2.5f)
+                drawLine(Cyan, Offset(tipX - 4f, tipY + 4f), Offset(tipX, tipY), strokeWidth = 2.5f)
+            }
+            Text(
+                "Restart System",
+                color = Cyan,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 14.sp
+            )
+        }
+    }
+    // Support & Updates
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF0F1624))
+            .border(1.dp, Cyan.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+            .clickable { onSupport() },
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Telegram-style send icon
+            Canvas(modifier = Modifier.size(18.dp)) {
+                val pts = listOf(
+                    Offset(size.width * 0.05f, size.height * 0.5f),
+                    Offset(size.width * 0.95f, size.height * 0.12f),
+                    Offset(size.width * 0.62f, size.height * 0.88f),
+                    Offset(size.width * 0.38f, size.height * 0.62f),
+                    Offset(size.width * 0.05f, size.height * 0.5f),
+                )
+                for (i in 0 until pts.size - 1) {
+                    drawLine(Cyan, pts[i], pts[i + 1], strokeWidth = 2f)
+                }
+                drawLine(Cyan, pts[3], pts[1], strokeWidth = 2f)
+            }
+            Text(
+                "Support & Updates",
+                color = Cyan,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 14.sp
+            )
+        }
+    }
+}
+
+// ── Home: Bottom Hook / Select Button ───────────────────────────────────────
+@Composable
+private fun BoxScope.BottomHookButton(
+    selectedApp: AppInfo?,
+    locking: Boolean,
+    onHook: () -> Unit,
+    onToggleAppList: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 16.dp)
+    ) {
+        val hasApp = selectedApp != null
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .then(
+                    if (hasApp)
+                        Modifier.background(Brush.linearGradient(listOf(RedHook, Pink)))
+                    else
+                        Modifier.background(Color(0xFF1E2330))
+                )
+                .clickable(enabled = !locking) {
+                    if (hasApp) onHook() else onToggleAppList()
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (locking) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("Locking...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+            } else if (hasApp) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Videocam,
+                        contentDescription = "Camera",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "HOOK CAMERA",
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 15.sp,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            "Tap to inject camera hook",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Lock,
+                        contentDescription = "Lock",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Text(
+                        "SELECT TARGET",
+                        color = Color.White,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 16.sp,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+        }
+    }
 }
 /**
 Attempt to acquire superuser access. Returns true if successful.
