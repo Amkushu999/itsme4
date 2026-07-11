@@ -20,30 +20,18 @@ import android.util.Log
 import com.itsme.amkush.utils.Logger
 import java.io.File
 import java.nio.ByteBuffer
-import java.util.concurrent.Executors // FIX: Added for background threading
+import java.util.concurrent.Executors
+// FIX: Added imports for Foreground Service Permission Check
+import android.content.pm.PackageManager
+import android.Manifest
+import androidx.core.content.ContextCompat
+import android.content.pm.ServiceInfo
 
 /**
  * InjectionService — module-process owner of the FFmpeg pipeline.
- *
- * Responsibilities:
- *   1. Run as a foreground service (camera + mediaPlayback type).
- *   2. Expose [ISurfaceInjector] Binder so Xposed hooks inside any hooked
- *      target-app process can deliver Surface objects for frame injection.
- *   3. Own and manage the FFmpeg decode context (via [FFmpegDecoder] JNI).
- *   4. Forward decoded I420 frames to [SurfaceRouter] which scales via LibYuv
- *      and pushes to each registered Surface via ImageWriter.
- *   5. Broadcast config changes to running hooked processes for live URL swaps.
- *
- * Threading:
- *   - Binder calls → Binder thread pool → forward to SurfaceRouter (thread-safe).
- *   - FFmpeg frames → native decode thread → SurfaceRouter.onFrameAvailable()
- *     → per-surface push threads (each with their own ImageWriter).
- *   - FIX: All FFmpeg open/close/hotSwap operations run on [decoderExecutor]
- *     to prevent ANR (Application Not Responding) errors caused by blocking
- *     network I/O in avformat_open_input().
+ * ... [Your original documentation] ...
  */
 class InjectionService : Service() {
-
     companion object {
         private const val TAG             = "InjectionService"
         private const val NOTIFICATION_ID = 1001
@@ -81,19 +69,10 @@ class InjectionService : Service() {
         }
     }
 
-    // Native decoder handle; 0 = not running
     @Volatile private var decoderHandle: Long = 0L
-
-    // FIX: Dedicated background thread for all FFmpeg operations.
-    // FFmpeg network calls (avformat_open_input) block the calling thread.
-    // If we call them on the main thread or Binder thread, it causes an ANR.
-    // Using a single-thread executor ensures operations are serialized.
     private val decoderExecutor = Executors.newSingleThreadExecutor()
 
-    // ── ISurfaceInjector Binder stub ─────────────────────────────────────────
-
     private val binderImpl = object : ISurfaceInjector.Stub() {
-
         override fun registerSurfaces(
             surfaces: List<Surface>,
             widths: IntArray,
@@ -115,7 +94,6 @@ class InjectionService : Service() {
         override fun startDecoder(url: String) {
             Logger.d(Logger.INJECTION, "$TAG startDecoder: url=$url")
             if (url.isNotBlank()) {
-                // FIX: Run on background thread to prevent ANR
                 decoderExecutor.execute { startOrRestartDecoder(url) }
             }
         }
@@ -123,25 +101,16 @@ class InjectionService : Service() {
         override fun hotSwap(url: String) {
             Logger.d(Logger.INJECTION, "$TAG hotSwap: url=$url")
             Log.d("FACEGATE", "InjectionService: hotSwap -> $url")
-            
-            // FIX: Run on background thread to prevent ANR
             decoderExecutor.execute {
                 if (url.isBlank()) {
                     Logger.d(Logger.INJECTION, "$TAG hotSwap blank — stopping decoder")
                     stopDecoder()
                     return@execute
                 }
-                
-                // Resolve URL outside the lock (can involve disk I/O for content:// URIs)
                 val resolved = resolveUrl(url) ?: run {
                     Logger.e(Logger.INJECTION, "$TAG hotSwap: URL resolution failed for $url")
                     return@execute
                 }
-                
-                // BUG FIX: Read decoderHandle and call hotSwap inside the same lock used by
-                // startOrRestartDecoder/stopDecoder. Without this, stopDecoder() can set
-                // decoderHandle=0 and free the native handle between our read and our call,
-                // resulting in FFmpegDecoder.hotSwap() being invoked on a closed/freed handle.
                 synchronized(this@InjectionService) {
                     val h = decoderHandle
                     if (h != 0L) {
@@ -158,28 +127,44 @@ class InjectionService : Service() {
         override fun stopAll() {
             Logger.d(Logger.INJECTION, "$TAG stopAll — tearing down all sessions and decoder")
             SurfaceRouter.unregisterAll()
-            // FIX: Run on background thread to prevent ANR
             decoderExecutor.execute { stopDecoder() }
         }
     }
 
     // ── Service lifecycle ─────────────────────────────────────────────────────
-
     override fun onCreate() {
         super.onCreate()
         isRunning = true
         AppState.context = applicationContext
-          createNotificationChannel()
-          startForeground(NOTIFICATION_ID, createNotification())
 
-          // Create shared socket directory for Mochi Cloner fallback transport
-          try { File("/sdcard/Android/media/com.itsme.amkush").mkdirs() } catch (_: Throwable) {}
+        createNotificationChannel()
+        val notification = createNotification()
 
-          // Start Unix socket server (low-cost — only active when hook connects via socket)
-          UnixSocketServer.start()
+        // FIX: Android 14+ (targetSdk 34/35) crashes if we start a 'camera' FGS 
+        // without the CAMERA runtime permission being explicitly granted by the user.
+        // We dynamically check the permission and fallback to 'mediaPlayback' which is 
+        // sufficient for FFmpeg decoding and doesn't require runtime permissions.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val hasCameraPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+            
+            val fgsType = if (hasCameraPermission) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            }
+            
+            startForeground(NOTIFICATION_ID, notification, fgsType)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
-          Logger.i(Logger.INJECTION, "$TAG created — FFmpeg decoder + Unix socket server ready")
-          Log.d("FACEGATE", "InjectionService: onCreate — foreground service started")
+        // Create shared socket directory for Mochi Cloner fallback transport
+        try { File("/sdcard/Android/media/com.itsme.amkush").mkdirs() } catch (_: Throwable) {}
+        
+        // Start Unix socket server (low-cost — only active when hook connects via socket)
+        UnixSocketServer.start()
+        Logger.i(Logger.INJECTION, "$TAG created — FFmpeg decoder + Unix socket server ready")
+        Log.d("FACEGATE", "InjectionService: onCreate — foreground service started")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -194,10 +179,9 @@ class InjectionService : Service() {
             RemoteConfig.setMediaUri(this, mediaUri)
             RemoteConfig.setInjectionActive(this, true)
             sendConfigBroadcast(streamUrl = streamUrl, mediaUri = mediaUri, active = true)
-            
+
             val url = streamUrl ?: mediaUri
             if (!url.isNullOrEmpty()) {
-                // FIX: Run on background thread to prevent ANR
                 decoderExecutor.execute { startOrRestartDecoder(url) }
             }
         }
@@ -209,29 +193,24 @@ class InjectionService : Service() {
     override fun onDestroy() {
         Logger.i(Logger.INJECTION, "$TAG onDestroy — tearing down decoder and all sessions")
         SurfaceRouter.unregisterAll()
-        
-        // FIX: Run on background thread to prevent ANR, then shutdown executor
         decoderExecutor.execute { 
             stopDecoder() 
             decoderExecutor.shutdown() 
         }
-        
         UnixSocketServer.stop()
-          RemoteConfig.clearAll(this)
-          sendConfigBroadcast(streamUrl = null, mediaUri = null, active = false)
-          isRunning = false
-          Log.d("FACEGATE", "InjectionService: onDestroy — service stopped")
-          super.onDestroy()
+        RemoteConfig.clearAll(this)
+        sendConfigBroadcast(streamUrl = null, mediaUri = null, active = false)
+        isRunning = false
+        Log.d("FACEGATE", "InjectionService: onDestroy — service stopped")
+        super.onDestroy()
     }
 
     // ── Decoder management ────────────────────────────────────────────────────
-
     private val frameCallback = object : FFmpegDecoder.FrameCallback {
         override fun onFrameAvailable(
             yBuf: ByteBuffer, uBuf: ByteBuffer, vBuf: ByteBuffer,
             width: Int, height: Int, ptsUs: Long
         ) {
-            // Forward to SurfaceRouter — it copies the planes before this returns
             SurfaceRouter.onFrameAvailable(yBuf, uBuf, vBuf, width, height, ptsUs)
         }
         override fun onError(code: Int, msg: String) {
@@ -246,38 +225,34 @@ class InjectionService : Service() {
         if (decoderHandle != 0L) return
         val url = RemoteConfig.getStreamUrl(this) ?: RemoteConfig.getMediaUri(this)
         if (!url.isNullOrEmpty()) {
-            // FIX: Run on background thread to prevent ANR
             decoderExecutor.execute { startOrRestartDecoder(url) }
         } else {
             Logger.d("$TAG no URL configured yet — decoder deferred until URL is set")
         }
     }
 
-    // BUG FIX: @Synchronized prevents two concurrent Binder threads from both calling
-    // FFmpegDecoder.open() simultaneously, which would leak the first handle.
     @Synchronized
     private fun startOrRestartDecoder(rawUrl: String) {
         stopDecoder()
         Logger.d(Logger.INJECTION, "$TAG startOrRestartDecoder raw=$rawUrl")
         Log.d("FACEGATE", "InjectionService: startOrRestartDecoder raw=$rawUrl")
-        
+
         val url = resolveUrl(rawUrl) ?: run {
             Logger.e(Logger.INJECTION, "$TAG URL resolution failed, aborting: $rawUrl")
             Log.e("FACEGATE", "InjectionService: URL resolution failed: $rawUrl")
             return
         }
-        
+
         if (url != rawUrl) {
             Logger.d(Logger.INJECTION, "$TAG URL normalized: $rawUrl → $url")
             Log.d("FACEGATE", "InjectionService: URL normalized: $rawUrl → $url")
         }
-        
+
         if (url.startsWith("rtmp://") || url.startsWith("rtmps://"))
             Logger.i(Logger.INJECTION, "$TAG RTMP stream — ensure port 1935 is reachable")
-        
+
         Logger.d(Logger.INJECTION, "$TAG FFmpegDecoder.open url=$url")
         val handle = FFmpegDecoder.open(url, frameCallback)
-        
         if (handle == 0L) {
             Logger.e(Logger.INJECTION, "$TAG FFmpegDecoder.open FAILED for: $url")
             Log.e("FACEGATE", "InjectionService: FFmpegDecoder.open FAILED url=$url")
@@ -288,7 +263,6 @@ class InjectionService : Service() {
         }
     }
 
-    // Add scheme if missing. Defaults to http:// (some FFmpeg builds lack TLS).
     private fun normalizeUrl(raw: String): String {
         val t = raw.trim()
         return when {
@@ -308,8 +282,6 @@ class InjectionService : Service() {
         }
     }
 
-    // Resolve URL for native FFmpeg. Copies content:// URIs to a temp file
-    // because Android content URIs are not understood by native FFmpeg.
     private fun resolveUrl(raw: String): String? {
         val normalized = normalizeUrl(raw)
         if (!normalized.startsWith("content://")) {
@@ -318,16 +290,11 @@ class InjectionService : Service() {
         }
         Logger.d(Logger.INJECTION, "$TAG resolveUrl: content:// URI — copying to temp file")
         Log.d("FACEGATE", "InjectionService: resolving content:// URI -> temp file")
-        
-        // BUG FIX (original): Create temp file reference before try-block so we can delete it on failure.
+
         val tmp = File(cacheDir, "fg_media_${System.currentTimeMillis()}.tmp")
         return try {
             clearMediaCache()
             val uri = Uri.parse(normalized)
-            // BUG FIX: openInputStream() can return null (e.g. provider returns no stream).
-            // Previously the null case fell through the ?.use block silently, then returned
-            // tmp.absolutePath pointing at an empty/non-existent file — FFmpeg would open it
-            // and immediately hit EOF with no useful error.
             val inputStream = contentResolver.openInputStream(uri) ?: run {
                 tmp.delete()
                 Logger.e(Logger.INJECTION, "$TAG resolveUrl: openInputStream returned null for $uri")
@@ -341,7 +308,6 @@ class InjectionService : Service() {
             Log.d("FACEGATE", "InjectionService: content:// resolved -> ${tmp.absolutePath} (${tmp.length()} bytes)")
             tmp.absolutePath
         } catch (e: Exception) {
-            // Delete partial/corrupt temp file so FFmpeg never gets it
             tmp.delete()
             Logger.e(Logger.INJECTION, "$TAG failed to resolve content URI: ${e.message}", e)
             Log.e("FACEGATE", "InjectionService: failed to resolve content URI: ${e.message}")
@@ -349,14 +315,12 @@ class InjectionService : Service() {
         }
     }
 
-    // Delete stale temp media files left from a previous session.
     private fun clearMediaCache() {
         try {
             cacheDir.listFiles()?.filter { it.name.startsWith("fg_media_") }?.forEach { it.delete() }
         } catch (_: Throwable) {}
     }
 
-    // BUG FIX: @Synchronized pairs with startOrRestartDecoder to prevent handle leaks
     @Synchronized
     private fun stopDecoder() {
         val h = decoderHandle
@@ -372,7 +336,6 @@ class InjectionService : Service() {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
     private fun sendConfigBroadcast(streamUrl: String?, mediaUri: String?, active: Boolean) {
         try {
             sendBroadcast(Intent(ConfigUpdateReceiver.ACTION).apply {
@@ -390,7 +353,7 @@ class InjectionService : Service() {
             val ch = NotificationChannel(
                 CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "FaceGate FFmpeg injection service"
+                description = "ACTIVE"
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
@@ -400,7 +363,7 @@ class InjectionService : Service() {
     private fun createNotification(): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("FaceGate")
-            .setContentText("FFmpeg camera injection active")
+            .setContentText("ACTIVE")
             .setSmallIcon(R.drawable.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
