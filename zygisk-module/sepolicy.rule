@@ -1,0 +1,8 @@
+allow cameraserver cameraserver_tmpfs file { read write open getattr execute map }
+allow cameraserver cameraserver_tmpfs dir { read open search getattr }
+allow cameraserver unlabeled file { read open getattr execute map }
+allow cameraserver unlabeled dir { read open search getattr }
+allow cameraserver unlabeled lnk_file { read getattr }
+allow init cameraserver process { noatsecure }
+allow untrusted_app cameraserver unix_stream_socket { connectto }
+allow cameraserver untrusted_app unix_stream_socket { read write accept }
